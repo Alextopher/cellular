@@ -3,8 +3,6 @@ extern crate vulkano_shaders;
 extern crate vulkano_win;
 extern crate winit;
 
-mod bandfilt;
-
 mod scramble_shader {
     vulkano_shaders::shader! {
       ty: "compute",
@@ -19,7 +17,6 @@ mod drift_shader {
     }
 }
 
-use bandfilt::{bandpass_pole, Filter, Compose, Fir, MultistageIir, IirStage};
 use rand_distr::Distribution;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
@@ -115,30 +112,7 @@ impl VulkanWindow {
         let mut frame_was_last_time = true;
         let mut step_counter = 0;
         let mut last_report_elapsed = 0.0;
-        // set up the filters to keep the shader parameters behaving resonably
-        let order = 8;
-        let lower = 1.0 / 1200.0;
-        let upper = 1.0 / 600.0;
-        let mut zeros = vec![];
-        let mut stages = vec![];
-        for i in 0..order {
-          zeros.push(1.0);
-          zeros.push(-1.0);
-          let pole = bandpass_pole(order, i, lower, upper);
-          println!("pole: {pole}");
-          // corresponds to two poles: `pole` and its complex conjugate
-          let stage = IirStage::Pair(- pole.norm_sqr(), pole.re + pole.re);
-          stages.push(stage);
-        }
-        let fir = Fir::from_zeros(&zeros, 1.0);
-        let iir = MultistageIir::from_stages(&stages);
-        let filter = Compose::new(fir, iir);
-        println!("parameter filter: {filter:?}");
-        let mut filters = [filter.clone(), filter.clone()];
 
-        // set up the noise to feed into the filter
-        let distrs = [rand_distr::Normal::<f64>::new(0.0, 4e-19).unwrap(), rand_distr::Normal::new(0.0, 4e-19).unwrap()];
-        let mut rng = rand::thread_rng();
         el.run(move |ev, _, elcf| {
             //println!("running event loop: {:?}", ev);
             *elcf = ControlFlow::Wait;
@@ -210,20 +184,15 @@ impl VulkanWindow {
                     step_counter += 1;
                     let size = sfc.window().inner_size();
                     let dims = [size.width, size.height];
-                    let samps = [distrs[0].sample(&mut rng), distrs[1].sample(&mut rng)];
-                    let mults = [filters[0].pump(samps[0]) as f32, filters[1].pump(samps[1]) as f32];
 //                    let phase = step_counter as f32 * 0.001 * std::f32::consts::TAU;
 //                    let warp = |x| 350.0 * (0.7 - f32::exp(1.0 * f32::sin(x)));
 //                    let wide = warp(phase);
 //                    let narrow = warp(phase - std::f32::consts::FRAC_PI_2);
-                    let adj = |x| if x < 0.0 { x * 30.0 } else { x };
-                    let wide = adj(mults[0]);
-                    let narrow = adj(mults[1]);
                     if elapsed > last_report_elapsed + 2.0 {
-                      println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}, wide mult: {wide:10.5}, narrow mult: {narrow:10.5}");
+                      println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}");
                       last_report_elapsed = elapsed;
                     }
-                    vk.do_frame(&sfc, dims, wide, narrow);
+                    vk.do_frame(&sfc, dims, 0.0, 0.0);
                 }
                 _ => {}
             }
