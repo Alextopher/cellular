@@ -190,7 +190,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             DEFAULT_DIMS,
         );
         let image_format = swapchain.image_format();
-        let arena_image = Self::make_arena_image(
+        let (arena_image, blur_image) = Self::make_storage(
             device.clone(),
             compute_queue.family(),
             DEFAULT_DIMS,
@@ -378,12 +378,13 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         (swapchain, swapchain_images)
     }
 
-    fn make_arena_image(
+    // make the GPU buffers: the arena image and the intermittent blur buffer
+    fn make_storage(
         device: Arc<Device>,
         qf: QueueFamily,
         dims: [u32; 2],
         format: ImageFormat,
-    ) -> Arc<StorageImage> {
+    ) -> (Arc<StorageImage>, Arc<StorageImage>) {
         let usage = ImageUsage {
             transfer_src: true,
             sampled: true,
@@ -404,7 +405,16 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             [qf],
         )
         .expect("could not create arena image!");
-        arena_image
+        let blur_image = StorageImage::with_usage(
+            device,
+            dimensions,
+            format,
+            usage,
+            ImageCreateFlags::none(),
+            [qf],
+        )
+        .expect("could not create blur image!");
+        (arena_image, blur_image)
     }
 
     fn make_desc_set(arena_image: Arc<StorageImage>, desc_set_layout: Arc<DescriptorSetLayout>, format: ImageFormat) -> Arc<PersistentDescriptorSet> {
@@ -432,6 +442,8 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         desc_set
     }
 
+    // rebuild the swapchain, in case the current one has become invalid (e.g.
+    // due to size change)
     pub fn rebuild_swapchain(&mut self, sfc: &Arc<Surface<W>>, dims: [u32; 2]) {
         let phy_dev = self.device.physical_device();
         let swp_caps = phy_dev
@@ -449,9 +461,10 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         self.swapchain_images = swapchain_images;
     }
 
-    pub fn rebuild_arena_image(&mut self, dims: [u32; 2]) {
+    // rebuild all of the GPU buffers, in case e.g. their size has changed
+    pub fn rebuild_storage(&mut self, dims: [u32; 2]) {
         let fmt = self.swapchain.image_format();
-        self.arena_image = Self::make_arena_image(
+        self.arena_image = Self::make_storage(
             self.device.clone(),
             self.compute_queue.family(),
             dims,
