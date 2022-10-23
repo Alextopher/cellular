@@ -25,6 +25,6 @@ void main() {
   float g = float((cu8 >> 8) & 0xff) / 255.0;
   cu8 = squares_rand(1);
   float b = float(cu8 & 0xff) / 255.0;
-  vec4 color = vec4(r, g, b, 1.0);
+  vec4 color = vec4(r, 0.0, 0.0, 1.0);
   imageStore(img, ivec2(gl_GlobalInvocationID.xy), color);
 }
