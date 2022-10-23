@@ -116,7 +116,7 @@ impl VulkanWindow {
                     println!("resizing to {}x{}", size.width, size.height);
                     let dims = [size.width, size.height];
                     vk.rebuild_swapchain(&sfc, dims);
-                    vk.rebuild_arena_image(dims);
+                    vk.rebuild_storage(dims);
                     vk.scramble(dims);
                     step_counter = 0;
                 }

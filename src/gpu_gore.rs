@@ -7,6 +7,13 @@ mod scramble_shader {
     }
 }
 
+mod xblur_shader {
+    vulkano_shaders::shader! {
+      ty: "compute",
+      path: "src/xblur.glsl",
+    }
+}
+
 mod drift_shader {
     vulkano_shaders::shader! {
       ty: "compute",
@@ -35,6 +42,7 @@ use vulkano::image::{
 };
 use vulkano::instance::{Instance, InstanceCreateInfo, Version as VkVersion};
 use vulkano::pipeline::{compute::ComputePipeline, Pipeline, PipelineBindPoint};
+use vulkano::sampler::{Sampler, SamplerCreateInfo};
 use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{
     self, CompositeAlpha, Surface, SurfaceCapabilities, SurfaceInfo, Swapchain, SwapchainCreateInfo,
@@ -70,11 +78,14 @@ pub struct VulkanData<W> {
     present_queue: Arc<Queue>,
     scramble: ShaderModData,
     drift: ShaderModData,
+    xblur: ShaderModData,
     arena_image: Arc<StorageImage>,
+    xblur_image: Arc<StorageImage>,
     swapchain: Arc<Swapchain<W>>,
     swapchain_images: Vec<Arc<SwapchainImage<W>>>,
     scramble_desc_set: Arc<PersistentDescriptorSet>,
     drift_desc_set: Arc<PersistentDescriptorSet>,
+    xblur_desc_set: Arc<PersistentDescriptorSet>,
     frame_future: Option<Box<dyn GpuFuture>>,
 }
 
@@ -181,6 +192,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         let (device, _qis, compute_queue, present_queue) = Self::create_device(&sfc, phy_dev);
         let scramble = Self::make_pipeline(&device, scramble_shader::load(device.clone()).expect("could not load scramble shader module!"));
         let drift = Self::make_pipeline(&device, drift_shader::load(device.clone()).expect("could not load drift shader module!"));
+        let xblur = Self::make_pipeline(&device, xblur_shader::load(device.clone()).expect("could not load xblur shader module!"));
         let (swapchain, swapchain_images) = Self::make_swapchain(
             &device,
             &sfc,
@@ -190,7 +202,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             DEFAULT_DIMS,
         );
         let image_format = swapchain.image_format();
-        let (arena_image, blur_image) = Self::make_storage(
+        let (arena_image, xblur_image) = Self::make_storage(
             device.clone(),
             compute_queue.family(),
             DEFAULT_DIMS,
@@ -206,6 +218,13 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
           drift.desc_set_layout.clone(),
           image_format,
           );
+        let xblur_desc_set = Self::make_xblur_desc_set(
+          device.clone(),
+          arena_image.clone(),
+          xblur_image.clone(),
+          xblur.desc_set_layout.clone(),
+          image_format,
+          );
         Self {
             inst,
             device,
@@ -213,11 +232,14 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             present_queue,
             scramble,
             drift,
+            xblur,
             arena_image,
+            xblur_image,
             swapchain,
             swapchain_images,
             scramble_desc_set,
             drift_desc_set,
+            xblur_desc_set,
             frame_future: None,
         }
     }
@@ -397,7 +419,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             array_layers: 1,
         };
         let arena_image = StorageImage::with_usage(
-            device,
+            device.clone(),
             dimensions,
             format,
             usage,
@@ -442,6 +464,42 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         desc_set
     }
 
+    fn make_xblur_desc_set(device: Arc<Device>, arena_image: Arc<StorageImage>,
+        xblur_image: Arc<StorageImage>, desc_set_layout:
+        Arc<DescriptorSetLayout>, format: ImageFormat) ->
+        Arc<PersistentDescriptorSet> {
+        let ivci = || ImageViewCreateInfo {
+            format: Some(format),
+            subresource_range: ImageSubresourceRange {
+                aspects: ImageAspects {
+                    color: true,
+                    ..ImageAspects::none()
+                },
+                mip_levels: 0..1,
+                array_layers: 0..1,
+            },
+            ..Default::default()
+        };
+        let desc_set = PersistentDescriptorSet::new(
+            desc_set_layout,
+            [
+            WriteDescriptorSet::image_view_sampler(
+                0,
+                ImageView::new(xblur_image, ivci())
+                    .expect("could not create image view for arena image"),
+                Sampler::new(device, SamplerCreateInfo::simple_repeat_linear_no_mipmap()).expect("could not create simple repeating linear sampler for an image on the chosen GPU!"),
+            ),
+            WriteDescriptorSet::image_view(
+                1,
+                ImageView::new(arena_image, ivci())
+                    .expect("could not create image view for arena image"),
+            ),
+            ],
+        )
+        .expect("could not create persistent descriptor set for arena image");
+        desc_set
+    }
+
     // rebuild the swapchain, in case the current one has become invalid (e.g.
     // due to size change)
     pub fn rebuild_swapchain(&mut self, sfc: &Arc<Surface<W>>, dims: [u32; 2]) {
@@ -464,7 +522,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     // rebuild all of the GPU buffers, in case e.g. their size has changed
     pub fn rebuild_storage(&mut self, dims: [u32; 2]) {
         let fmt = self.swapchain.image_format();
-        self.arena_image = Self::make_storage(
+        (self.arena_image, self.xblur_image) = Self::make_storage(
             self.device.clone(),
             self.compute_queue.family(),
             dims,
@@ -478,6 +536,13 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         self.drift_desc_set = Self::make_desc_set(
           self.arena_image.clone(),
           self.drift.desc_set_layout.clone(),
+          fmt,
+          );
+        self.xblur_desc_set = Self::make_xblur_desc_set(
+          self.device.clone(),
+          self.arena_image.clone(),
+          self.xblur_image.clone(),
+          self.xblur.desc_set_layout.clone(),
           fmt,
           );
     }
