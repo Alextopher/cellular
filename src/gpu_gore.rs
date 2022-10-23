@@ -595,7 +595,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
               let mut builder = AutoCommandBufferBuilder::primary(
                 self.device.clone(),
                 self.compute_queue.family(),
-                CommandBufferUsage::MultipleSubmit,
+                CommandBufferUsage::OneTimeSubmit,
               )
                 .expect("could not make command buffer builder!");
                 let prng_seed: u32 = rand::thread_rng().gen();
@@ -613,12 +613,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                     DriftParams { prng_seed, flags, mult1, mult2, invocation_size },
                   )
                   .dispatch([(invocation_size[0] as u32 + 31) / 32, (invocation_size[1] as u32 + 31) / 32, 1])
-                  .expect("could not dispatch compute operation!")
-                  .copy_image(CopyImageInfo::images(
-                      self.arena_image.clone(),
-                      self.swapchain_images[image_idx].clone(),
-                  ))
-                  .expect("could not copy arena image to swapchain image!");
+                  .expect("could not dispatch compute operation!");
                 let buffer = builder
                   .build()
                   .expect("could not build command buffer!");
@@ -626,11 +621,28 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 };
             let even_buffer = make_cmd_buffer(0, -mult1, -mult2);
             let odd_buffer = make_cmd_buffer(1, -mult1, -mult2);
+            let copy_buffer = {
+                let mut builder = AutoCommandBufferBuilder::primary(
+                    self.device.clone(),
+                    self.compute_queue.family(),
+                    CommandBufferUsage::OneTimeSubmit,
+                )
+                .expect("could not make command buffer builder!");
+                builder.
+                    copy_image(CopyImageInfo::images(
+                            self.arena_image.clone(),
+                            self.swapchain_images[image_idx].clone(),
+                            ))
+                  .expect("could not copy arena image to swapchain image!");
+                builder.build().expect("could not build copy command buffer!")
+            };
             let frame_future = acquire_future
                 .then_execute(self.compute_queue.clone(), even_buffer)
                 .expect("could not queue execution of command buffer!")
                 .then_execute(self.compute_queue.clone(), odd_buffer)
                 .expect("could not queue execution of command buffer!")
+                .then_execute(self.compute_queue.clone(), copy_buffer)
+                .expect("could not queue copy operation!")
                 .then_signal_semaphore()
                 .then_swapchain_present(
                     self.present_queue.clone(),
