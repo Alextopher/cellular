@@ -485,13 +485,13 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             [
             WriteDescriptorSet::image_view_sampler(
                 0,
-                ImageView::new(xblur_image, ivci())
+                ImageView::new(arena_image, ivci())
                     .expect("could not create image view for arena image"),
                 Sampler::new(device, SamplerCreateInfo::simple_repeat_linear_no_mipmap()).expect("could not create simple repeating linear sampler for an image on the chosen GPU!"),
             ),
             WriteDescriptorSet::image_view(
                 1,
-                ImageView::new(arena_image, ivci())
+                ImageView::new(xblur_image, ivci())
                     .expect("could not create image view for arena image"),
             ),
             ],
@@ -621,28 +621,37 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 };
             let even_buffer = make_cmd_buffer(0, -mult1, -mult2);
             let odd_buffer = make_cmd_buffer(1, -mult1, -mult2);
-            let copy_buffer = {
+            let xblur_cmd_buffer = {
                 let mut builder = AutoCommandBufferBuilder::primary(
                     self.device.clone(),
                     self.compute_queue.family(),
                     CommandBufferUsage::OneTimeSubmit,
                 )
                 .expect("could not make command buffer builder!");
-                builder.
-                    copy_image(CopyImageInfo::images(
-                            self.arena_image.clone(),
+                builder
+                    .bind_pipeline_compute(self.xblur.pipeline.clone())
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Compute,
+                        self.xblur.pipeline.layout().clone(),
+                        0,
+                        self.xblur_desc_set.clone(),
+                    )
+                    .dispatch([(dims[0] + 31) / 32, (dims[1] + 31) / 32, 1])
+                    .expect("could not dispatch compute operation!")
+                    .copy_image(CopyImageInfo::images(
+                            self.xblur_image.clone(),
                             self.swapchain_images[image_idx].clone(),
                             ))
-                  .expect("could not copy arena image to swapchain image!");
-                builder.build().expect("could not build copy command buffer!")
+                  .expect("could not copy blur image to swapchain image!");
+                builder.build().expect("could not build blur command buffer!")
             };
             let frame_future = acquire_future
                 .then_execute(self.compute_queue.clone(), even_buffer)
                 .expect("could not queue execution of command buffer!")
                 .then_execute(self.compute_queue.clone(), odd_buffer)
                 .expect("could not queue execution of command buffer!")
-                .then_execute(self.compute_queue.clone(), copy_buffer)
-                .expect("could not queue copy operation!")
+                .then_execute(self.compute_queue.clone(), xblur_cmd_buffer)
+                .expect("could not queue blur operation!")
                 .then_signal_semaphore()
                 .then_swapchain_present(
                     self.present_queue.clone(),
