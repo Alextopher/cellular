@@ -19,7 +19,7 @@ layout(push_constant) uniform PushConstants {
 
 void main() {
   ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
-  if (coords.x >= constants.height || coords.y >= constants.width) {
+  if (coords.x >= constants.width || coords.y >= constants.height) {
     return;
   }
   int offset = coords.y * constants.width + coords.x;

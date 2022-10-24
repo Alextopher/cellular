@@ -64,7 +64,6 @@ pub struct BufferReadParams {
     width: i32,
 }
 
-
 pub struct VulkanData<W> {
     inst: Arc<Instance>,
     device: Arc<Device>,
@@ -540,10 +539,10 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         if let Some(mut last_frame) = self.frame_future.take() {
             last_frame.cleanup_finished();
         }
-        let invocation_size = [dims[0], dims[1]];
+        let invocation_size = [(dims[0] + 31) / 32, (dims[1] + 31) / 32, 1];
         let buffer_read_params = BufferReadParams {
-            height: dims[1] as i32,
-            width: dims[0] as i32,
+            height: 0x7fffffff as i32,
+            width: 0x7fffffff as i32,
         };
         loop {
             let (image_idx, suboptimal, acquire_future) =
@@ -569,7 +568,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                         0,
                         &buffer_read_params,
                         )
-                    .dispatch([(dims[0] + 31) / 32, (dims[1] + 31) / 32, 1])
+                    .dispatch(invocation_size)
                     .expect("could not dispatch compute operation!");
                 builder.build().expect("could not build blur command buffer!")
             };
@@ -593,7 +592,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                       0,
                       &buffer_read_params,
                   )
-                  .dispatch([(invocation_size[0] as u32 + 31) / 32, (invocation_size[1] as u32 + 31) / 32, 1])
+                  .dispatch(invocation_size)
                   .expect("could not dispatch compute operation!");
                 let buffer = builder
                   .build()
@@ -620,7 +619,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                       0,
                       &buffer_read_params,
                   )
-                  .dispatch([(dims[0] + 31) / 32, (dims[1] + 31) / 32, 1])
+                  .dispatch(invocation_size)
                   .expect("could not dispatch compute operation!");
                 let buffer = builder
                   .build()
@@ -634,7 +633,8 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 .expect(":(")
                 .wait(None)
                 .expect(":(");
-            // not sure why this is necessary
+            // not sure wh it is necessary to force the last operation to
+            // complete first. maybe an api bug?
             let frame_future = vulkano::sync::now(self.device.clone())
                 .then_execute(self.compute_queue.clone(), cells_buffer)
                 .expect("could not queue execution of command buffer!")
