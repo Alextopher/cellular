@@ -43,6 +43,16 @@ vec4 blurred_sample(ivec2 coords, int offset) {
   return big_output - small_output;
 }
 
+const float a = 0.8;
+const float b = 0.5;
+const float c = -0.5;
+const mat4 cross_diff = mat4(
+      a,    c,    b,    0,
+      b,    a,    c,    0,
+      c,    b,    a,    0,
+      0,    0,    0,    0 
+    );
+
 void main() {
   ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
   if (coords.x >= constants.width || coords.y >= constants.height) {
@@ -52,11 +62,12 @@ void main() {
   vec4 n = blurred_sample(coords, 2 * offset);
   vec4 self = arena[offset];
   float step = 0.02;
-  float two_sigma = 2.0 * 0.1;
-  float mu = 0.3;
+  vec4 two_sigma = 2.0 * vec4(0.05, 0.02, 0.01, 1.0);
+  vec4 mu = vec4(0.2, 0.3, 0.4, 0.0);
   vec4 diff = n - mu;
   vec4 factor = 2.0 * exp(- diff * diff / two_sigma) - 1.0;
+  factor = cross_diff * factor;
   vec4 result = clamp(self + factor * step, 0.0, 1.0);
-  arena[offset] = vec4(result.x, n.x, -n.x, 0.0);
+  arena[offset] = result;
 }
 
