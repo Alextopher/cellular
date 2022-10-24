@@ -15,7 +15,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
-use gpu_gore::{VulkanData, ScrambleParams, DriftParams};
+use gpu_gore::{VulkanData};
 
 use rand::Rng;
 
@@ -45,8 +45,8 @@ impl VulkanWindow {
     fn init() -> Self {
         let inst = VulkanData::<()>::init_vk_instance();
         let (sfc, el) = Self::init_winit(&inst);
-        let mut vk = VulkanData::init(inst, sfc.clone());
-        vk.scramble(DEFAULT_DIMS);
+        let vk = VulkanData::init(inst, sfc.clone());
+        //vk.scramble(DEFAULT_DIMS);
         Self { sfc, el, vk }
     }
 
@@ -117,7 +117,7 @@ impl VulkanWindow {
                     let dims = [size.width, size.height];
                     vk.rebuild_swapchain(&sfc, dims);
                     vk.rebuild_storage(dims);
-                    vk.scramble(dims);
+                    //vk.scramble(dims);
                     step_counter = 0;
                 }
                 Event::RedrawRequested(_) => {
@@ -139,7 +139,7 @@ impl VulkanWindow {
                       println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}");
                       last_report_elapsed = elapsed;
                     }
-                    vk.do_frame(&sfc, dims, 0.0, 0.0);
+                    vk.do_frame(&sfc, dims);
                 }
                 _ => {}
             }

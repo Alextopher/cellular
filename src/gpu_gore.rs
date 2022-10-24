@@ -1,12 +1,5 @@
 /// A module for containing the ugly Vulkan code
 
-mod scramble_shader {
-    vulkano_shaders::shader! {
-      ty: "compute",
-      path: "src/scramble.glsl",
-    }
-}
-
 mod xblur_shader {
     vulkano_shaders::shader! {
       ty: "compute",
@@ -21,11 +14,19 @@ mod cells_shader {
     }
 }
 
+mod blit_shader {
+    vulkano_shaders::shader! {
+      ty: "compute",
+      path: "src/blit.glsl",
+    }
+}
+
 use rand::Rng;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 use super::DEFAULT_DIMS;
+use vulkano::buffer::{DeviceLocalBuffer, BufferUsage};
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyImageInfo, PrimaryCommandBuffer};
 use vulkano::descriptor_set::{
     layout::DescriptorSetLayout, persistent::PersistentDescriptorSet, WriteDescriptorSet,
@@ -34,6 +35,7 @@ use vulkano::device::{
     physical::{PhysicalDevice, QueueFamily},
     Device, DeviceCreateInfo, DeviceExtensions, Features, Queue, QueueCreateInfo,
 };
+use vulkano::DeviceSize;
 use vulkano::format::Format as ImageFormat;
 use vulkano::image::{
     view::{ImageView, ImageViewCreateInfo},
@@ -57,17 +59,9 @@ use winit::{
 };
 
 #[repr(C)]
-pub struct ScrambleParams {
-    prng_seed: u32,
-}
-
-#[repr(C)]
-pub struct DriftParams {
-    prng_seed: u32,
-    flags: u32,
-    mult1: f32,
-    mult2: f32,
-    invocation_size: [i32; 2],
+pub struct BufferReadParams {
+    height: i32,
+    width: i32,
 }
 
 
@@ -76,16 +70,16 @@ pub struct VulkanData<W> {
     device: Arc<Device>,
     compute_queue: Arc<Queue>,
     present_queue: Arc<Queue>,
-    scramble: ShaderModData,
     cells: ShaderModData,
     xblur: ShaderModData,
-    arena_image: Arc<StorageImage>,
-    xblur_image: Arc<StorageImage>,
+    blit: ShaderModData,
+    arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
+    xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
     swapchain: Arc<Swapchain<W>>,
     swapchain_images: Vec<Arc<SwapchainImage<W>>>,
-    scramble_desc_set: Arc<PersistentDescriptorSet>,
     cells_desc_set: Arc<PersistentDescriptorSet>,
     xblur_desc_set: Arc<PersistentDescriptorSet>,
+    blit_desc_sets: Vec<Arc<PersistentDescriptorSet>>,
     frame_future: Option<Box<dyn GpuFuture>>,
 }
 
@@ -190,9 +184,9 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .surface_capabilities(sfc.as_ref(), SurfaceInfo::default())
             .expect("unable to determine capabilities of surface with device!");
         let (device, _qis, compute_queue, present_queue) = Self::create_device(&sfc, phy_dev);
-        let scramble = Self::make_pipeline(&device, scramble_shader::load(device.clone()).expect("could not load scramble shader module!"));
         let cells = Self::make_pipeline(&device, cells_shader::load(device.clone()).expect("could not load cells shader module!"));
         let xblur = Self::make_pipeline(&device, xblur_shader::load(device.clone()).expect("could not load xblur shader module!"));
+        let blit = Self::make_pipeline(&device, blit_shader::load(device.clone()).expect("could not load blit shader module!"));
         let (swapchain, swapchain_images) = Self::make_swapchain(
             &device,
             &sfc,
@@ -202,46 +196,41 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             DEFAULT_DIMS,
         );
         let image_format = swapchain.image_format();
-        let (arena_image, xblur_image) = Self::make_storage(
+        let (arena_buffer, xblur_buffer) = Self::make_storage(
             device.clone(),
             compute_queue.family(),
             DEFAULT_DIMS,
-            image_format,
         );
-        let scramble_desc_set = Self::make_desc_set(
-          arena_image.clone(),
-          scramble.desc_set_layout.clone(),
-          image_format,
-          );
         let cells_desc_set = Self::make_cells_desc_set(
           device.clone(),
-          arena_image.clone(),
-          xblur_image.clone(),
+          arena_buffer.clone(),
+          xblur_buffer.clone(),
           cells.desc_set_layout.clone(),
-          image_format,
           );
         let xblur_desc_set = Self::make_xblur_desc_set(
           device.clone(),
-          arena_image.clone(),
-          xblur_image.clone(),
+          arena_buffer.clone(),
+          xblur_buffer.clone(),
           xblur.desc_set_layout.clone(),
-          image_format,
           );
+        let blit_desc_sets = swapchain_images.iter().cloned().map(|si|
+            Self::make_blit_desc_set(device.clone(), arena_buffer.clone(), si, blit.desc_set_layout.clone(), image_format)
+            ).collect();
         Self {
             inst,
             device,
             compute_queue,
             present_queue,
-            scramble,
             cells,
             xblur,
-            arena_image,
-            xblur_image,
+            blit,
+            arena_buffer,
+            xblur_buffer,
             swapchain,
             swapchain_images,
-            scramble_desc_set,
             cells_desc_set,
             xblur_desc_set,
+            blit_desc_sets,
             frame_future: None,
         }
     }
@@ -407,134 +396,93 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         device: Arc<Device>,
         qf: QueueFamily,
         dims: [u32; 2],
-        format: ImageFormat,
-    ) -> (Arc<StorageImage>, Arc<StorageImage>) {
-        let usage = ImageUsage {
-            transfer_src: true,
-            sampled: true,
-            storage: true,
-            ..ImageUsage::none()
+    ) -> (Arc<DeviceLocalBuffer<[f32]>>, Arc<DeviceLocalBuffer<[f32]>>) {
+        let usage = BufferUsage {
+            storage_buffer: true,
+            .. BufferUsage::none()
         };
-        let dimensions = ImageDimensions::Dim2d {
-            width: dims[0],
-            height: dims[1],
-            array_layers: 1,
+        let mkbuf = || {
+            DeviceLocalBuffer::array(
+                device.clone(),
+                (dims[0] * dims[1] * 4) as DeviceSize,
+                usage,
+                [qf],
+                ).expect("could not create a GPU buffer!")
         };
-        let arena_image = StorageImage::with_usage(
-            device.clone(),
-            dimensions,
-            format,
-            usage,
-            ImageCreateFlags::none(),
-            [qf],
-        )
-        .expect("could not create arena image!");
-        let blur_image = StorageImage::with_usage(
-            device,
-            dimensions,
-            format,
-            usage,
-            ImageCreateFlags::none(),
-            [qf],
-        )
-        .expect("could not create blur image!");
-        (arena_image, blur_image)
+        (mkbuf(), mkbuf())
     }
 
-    fn make_desc_set(arena_image: Arc<StorageImage>, desc_set_layout: Arc<DescriptorSetLayout>, format: ImageFormat) -> Arc<PersistentDescriptorSet> {
+    fn make_cells_desc_set(device: Arc<Device>, arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
+        xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>, desc_set_layout:
+        Arc<DescriptorSetLayout>) ->
+        Arc<PersistentDescriptorSet> {
+        let desc_set = PersistentDescriptorSet::new(
+            desc_set_layout,
+            [
+            WriteDescriptorSet::buffer(
+                0,
+                arena_buffer.clone(),
+            ),
+            WriteDescriptorSet::buffer(
+                1,
+                xblur_buffer.clone(),
+            ),
+            ],
+        )
+        .expect("could not create persistent descriptor set for arena image");
+        desc_set
+    }
+
+    fn make_xblur_desc_set(device: Arc<Device>, arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
+        xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>, desc_set_layout:
+        Arc<DescriptorSetLayout>) ->
+        Arc<PersistentDescriptorSet> {
+        let desc_set = PersistentDescriptorSet::new(
+            desc_set_layout,
+            [
+            WriteDescriptorSet::buffer(
+                0,
+                arena_buffer.clone(),
+            ),
+            WriteDescriptorSet::buffer(
+                1,
+                xblur_buffer.clone(),
+            ),
+            ],
+        )
+        .expect("could not create persistent descriptor set for arena image");
+        desc_set
+    }
+
+    fn make_blit_desc_set(device: Arc<Device>, arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
+        swapchain_image: Arc<SwapchainImage<W>>, desc_set_layout: Arc<DescriptorSetLayout>,
+        format: ImageFormat) -> Arc<PersistentDescriptorSet> {
         let ivci = ImageViewCreateInfo {
             format: Some(format),
             subresource_range: ImageSubresourceRange {
                 aspects: ImageAspects {
                     color: true,
-                    ..ImageAspects::none()
+                    .. ImageAspects::none()
                 },
                 mip_levels: 0..1,
                 array_layers: 0..1,
             },
-            ..Default::default()
-        };
-        let desc_set = PersistentDescriptorSet::new(
-            desc_set_layout,
-            [WriteDescriptorSet::image_view(
-                0,
-                ImageView::new(arena_image, ivci)
-                    .expect("could not create image view for arena image"),
-            )],
-        )
-        .expect("could not create persistent descriptor set for arena image");
-        desc_set
-    }
-
-    fn make_cells_desc_set(device: Arc<Device>, arena_image: Arc<StorageImage>,
-        xblur_image: Arc<StorageImage>, desc_set_layout:
-        Arc<DescriptorSetLayout>, format: ImageFormat) ->
-        Arc<PersistentDescriptorSet> {
-        let ivci = || ImageViewCreateInfo {
-            format: Some(format),
-            subresource_range: ImageSubresourceRange {
-                aspects: ImageAspects {
-                    color: true,
-                    ..ImageAspects::none()
-                },
-                mip_levels: 0..1,
-                array_layers: 0..1,
-            },
-            ..Default::default()
+            .. Default::default()
         };
         let desc_set = PersistentDescriptorSet::new(
             desc_set_layout,
             [
             WriteDescriptorSet::image_view(
                 0,
-                ImageView::new(arena_image, ivci())
-                    .expect("could not create image view for arena image"),
-            ),
-            WriteDescriptorSet::image_view_sampler(
+                ImageView::new(swapchain_image, ivci)
+                .expect("could not create image view for swapchain image")),
+            WriteDescriptorSet::buffer(
                 1,
-                ImageView::new(xblur_image, ivci())
-                    .expect("could not create image view for arena image"),
-                Sampler::new(device, SamplerCreateInfo::simple_repeat_linear_no_mipmap()).expect("could not create simple repeating linear sampler for an image on the chosen GPU!"),
-            ),
-            ],
+                arena_buffer.clone(),
+                ),
+            ]
         )
-        .expect("could not create persistent descriptor set for arena image");
-        desc_set
-    }
-
-    fn make_xblur_desc_set(device: Arc<Device>, arena_image: Arc<StorageImage>,
-        xblur_image: Arc<StorageImage>, desc_set_layout:
-        Arc<DescriptorSetLayout>, format: ImageFormat) ->
-        Arc<PersistentDescriptorSet> {
-        let ivci = || ImageViewCreateInfo {
-            format: Some(format),
-            subresource_range: ImageSubresourceRange {
-                aspects: ImageAspects {
-                    color: true,
-                    ..ImageAspects::none()
-                },
-                mip_levels: 0..1,
-                array_layers: 0..1,
-            },
-            ..Default::default()
-        };
-        let desc_set = PersistentDescriptorSet::new(
-            desc_set_layout,
-            [
-            WriteDescriptorSet::image_view_sampler(
-                0,
-                ImageView::new(arena_image, ivci())
-                    .expect("could not create image view for arena image"),
-                Sampler::new(device, SamplerCreateInfo::simple_repeat_linear_no_mipmap()).expect("could not create simple repeating linear sampler for an image on the chosen GPU!"),
-            ),
-            WriteDescriptorSet::image_view(
-                1,
-                ImageView::new(xblur_image, ivci())
-                    .expect("could not create image view for arena image"),
-            ),
-            ],
-        )
-        .expect("could not create persistent descriptor set for arena image");
+            .expect("could not create persistent descriptor set for blit shader");
         desc_set
     }
 
@@ -560,73 +508,43 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     // rebuild all of the GPU buffers, in case e.g. their size has changed
     pub fn rebuild_storage(&mut self, dims: [u32; 2]) {
         let fmt = self.swapchain.image_format();
-        (self.arena_image, self.xblur_image) = Self::make_storage(
+        (self.arena_buffer, self.xblur_buffer) = Self::make_storage(
             self.device.clone(),
             self.compute_queue.family(),
             dims,
-            fmt,
         );
-        self.scramble_desc_set = Self::make_desc_set(
-          self.arena_image.clone(),
-          self.scramble.desc_set_layout.clone(),
-          fmt,
-          );
         self.cells_desc_set = Self::make_cells_desc_set(
           self.device.clone(),
-          self.arena_image.clone(),
-          self.xblur_image.clone(),
+          self.arena_buffer.clone(),
+          self.xblur_buffer.clone(),
           self.cells.desc_set_layout.clone(),
-          fmt,
           );
         self.xblur_desc_set = Self::make_xblur_desc_set(
           self.device.clone(),
-          self.arena_image.clone(),
-          self.xblur_image.clone(),
+          self.arena_buffer.clone(),
+          self.xblur_buffer.clone(),
           self.xblur.desc_set_layout.clone(),
-          fmt,
           );
+        self.blit_desc_sets = self.swapchain_images.iter().cloned().map(|si|
+            Self::make_blit_desc_set(
+                self.device.clone(),
+                self.arena_buffer.clone(),
+                si,
+                self.blit.desc_set_layout.clone(),
+                fmt,
+                )
+            ).collect();
     }
 
-    pub fn scramble(&mut self, dims: [u32; 2]) {
-        let mut command_buffer_builder = AutoCommandBufferBuilder::primary(
-            self.device.clone(),
-            self.compute_queue.family(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-            .expect("could not make command buffer builder!");
-        let prng_seed: u32 = rand::thread_rng().gen();
-        command_buffer_builder
-            .bind_pipeline_compute(self.scramble.pipeline.clone())
-            .bind_descriptor_sets(
-                PipelineBindPoint::Compute,
-                self.scramble.pipeline.layout().clone(),
-                0,
-                self.scramble_desc_set.clone(),
-            )
-            .push_constants(
-                self.scramble.pipeline.layout().clone(),
-                0,
-                ScrambleParams { prng_seed },
-            )
-            .dispatch([(dims[0] + 31) / 32, (dims[1] + 31) / 32, 1])
-            .expect("could not dispatch compute operation!");
-        let command_buffer = command_buffer_builder
-            .build()
-            .expect("could not build command buffer!");
-        let scramble_future = if let Some(fut) = self.frame_future.take() {
-            fut.then_execute(self.compute_queue.clone(), command_buffer).expect("could not queue execution of scramble after current presentation!").boxed()
-        } else {
-            command_buffer.execute(self.compute_queue.clone()).expect("could not queue execution of scramble!").boxed()
-        };
-        scramble_future.flush().expect("could not flush command queue for scrambling!");
-        self.frame_future = Some(scramble_future);
-    }
-
-    pub fn do_frame(&mut self, sfc: &Arc<Surface<W>>, dims: [u32; 2], mult1: f32, mult2: f32) {
+    pub fn do_frame(&mut self, sfc: &Arc<Surface<W>>, dims: [u32; 2]) {
         if let Some(mut last_frame) = self.frame_future.take() {
             last_frame.cleanup_finished();
         }
         let invocation_size = [dims[0], dims[1]];
+        let buffer_read_params = BufferReadParams {
+            height: dims[1] as i32,
+            width: dims[0] as i32,
+        };
         loop {
             let (image_idx, suboptimal, acquire_future) =
                 swapchain::acquire_next_image(self.swapchain.clone(), None)
@@ -646,18 +564,22 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                         0,
                         self.xblur_desc_set.clone(),
                     )
+                    .push_constants(
+                        self.xblur.pipeline.layout().clone(),
+                        0,
+                        &buffer_read_params,
+                        )
                     .dispatch([(dims[0] + 31) / 32, (dims[1] + 31) / 32, 1])
                     .expect("could not dispatch compute operation!");
                 builder.build().expect("could not build blur command buffer!")
             };
-            let make_cmd_buffer = || {
+            let cells_buffer = {
               let mut builder = AutoCommandBufferBuilder::primary(
                 self.device.clone(),
                 self.compute_queue.family(),
                 CommandBufferUsage::OneTimeSubmit,
               )
                 .expect("could not make command buffer builder!");
-                let prng_seed: u32 = rand::thread_rng().gen();
                 builder
                   .bind_pipeline_compute(self.cells.pipeline.clone())
                   .bind_descriptor_sets(
@@ -666,23 +588,57 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                     0,
                     self.cells_desc_set.clone(),
                   )
+                  .push_constants(
+                      self.cells.pipeline.layout().clone(),
+                      0,
+                      &buffer_read_params,
+                  )
                   .dispatch([(invocation_size[0] as u32 + 31) / 32, (invocation_size[1] as u32 + 31) / 32, 1])
-                  .expect("could not dispatch compute operation!")
-                  .copy_image(CopyImageInfo::images(
-                            self.arena_image.clone(),
-                            self.swapchain_images[image_idx].clone(),
-                            ))
-                  .expect("could not copy blur image to swapchain image!");
+                  .expect("could not dispatch compute operation!");
                 let buffer = builder
                   .build()
                   .expect("could not build command buffer!");
                 buffer
                 };
-            let cells_buffer = make_cmd_buffer();
-            let frame_future = acquire_future
+            let blit_buffer = {
+              let mut builder = AutoCommandBufferBuilder::primary(
+                self.device.clone(),
+                self.compute_queue.family(),
+                CommandBufferUsage::OneTimeSubmit,
+              )
+                .expect("could not make command buffer builder!");
+                builder
+                  .bind_pipeline_compute(self.blit.pipeline.clone())
+                  .bind_descriptor_sets(
+                    PipelineBindPoint::Compute,
+                    self.blit.pipeline.layout().clone(),
+                    0,
+                    self.blit_desc_sets[image_idx].clone(),
+                  )
+                  .push_constants(
+                      self.blit.pipeline.layout().clone(),
+                      0,
+                      &buffer_read_params,
+                  )
+                  .dispatch([(dims[0] + 31) / 32, (dims[1] + 31) / 32, 1])
+                  .expect("could not dispatch compute operation!");
+                let buffer = builder
+                  .build()
+                  .expect("could not build command buffer!");
+                buffer
+            };
+            acquire_future
                 .then_execute(self.compute_queue.clone(), xblur_cmd_buffer)
                 .expect("could not queue blur operation!")
+                .then_signal_fence_and_flush()
+                .expect(":(")
+                .wait(None)
+                .expect(":(");
+            // not sure why this is necessary
+            let frame_future = vulkano::sync::now(self.device.clone())
                 .then_execute(self.compute_queue.clone(), cells_buffer)
+                .expect("could not queue execution of command buffer!")
+                .then_execute(self.compute_queue.clone(), blit_buffer)
                 .expect("could not queue execution of command buffer!")
                 .then_signal_semaphore()
                 .then_swapchain_present(

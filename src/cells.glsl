@@ -2,36 +2,59 @@
 
 layout (local_size_x = 32, local_size_y = 32) in;
 
-layout(set = 0, binding = 0, rgba8) uniform image2D arena;
+layout(set = 0, binding = 0) buffer ly_arena {
+  vec4 arena[];
+};
 
-layout(set = 0, binding = 1) uniform sampler2D xblur;
+layout(set = 0, binding = 1) buffer ly_xblur {
+  vec4 xblur[];
+};
+
+layout(push_constant) uniform PushConstants {
+  int height;
+  int width;
+} constants;
 
 #include "kernel.glsl"
 
-vec4 blurred_sample() {
+vec4 blurred_sample(ivec2 coords, int offset) {
+  int column_stride = constants.width;
+  int loop_stride = constants.width * (constants.height - 1);
   vec4 blur_output = vec4(0.0, 0.0, 0.0, 0.0);
-  ivec2 imgsz = imageSize(arena);
-  float pixel_offset = 1.0 / float(imgsz.y);
-  vec2 coords = (vec2(gl_GlobalInvocationID.xy) + vec2(0.5, 0.5)) / imgsz;
+  int lowy = coords.y, highy = coords.y;
+  int lowoff = offset, highoff = offset;
   for (int i = 0; i < num_steps; i++) {
-    blur_output += weights[i] *
-      (
-       texture(xblur, coords + vec2(0.0, pixel_offset * offsets[i])) +
-       texture(xblur, coords - vec2(0.0, pixel_offset * offsets[i]))
-      );
+    blur_output += weights[i] * (xblur[lowoff] + xblur[highoff]);
+    lowoff -= column_stride;
+    lowy -= 1;
+    highoff += column_stride;
+    highy += 1;
+    if (highy >= constants.height) {
+      highy = 0;
+      highoff -= loop_stride;
+    }
+    if (lowy < 0) {
+      lowy = constants.height - 1;
+      lowoff += loop_stride;
+    }
   }
   return blur_output;
 }
 
 void main() {
-  vec4 n = blurred_sample();
-  vec4 self = imageLoad(arena, ivec2(gl_GlobalInvocationID.xy));
+  ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
+  if (coords.x >= constants.height || coords.y >= constants.width) {
+    return;
+  }
+  int offset = coords.y * constants.width + coords.x;
+  vec4 n = blurred_sample(coords, offset);
+  vec4 self = arena[offset];
 //  vec4 neg_self = (vec4(1.0, 1.0, 1.0, 1.0) - self);
 //  vec4 clamp_scale = 0.5 + 4.0 * self * neg_self;
   float step = 0.9;
   vec4 live_growth = (n - 0.2) * (0.5 - n);
 //  vec4 dead_growth = n - 0.2;
 //  vec4 diff = dead_growth * neg_self + live_growth * self;
-  imageStore(arena, ivec2(gl_GlobalInvocationID.xy), self + live_growth * step);
+  arena[offset] = self + live_growth * step;
 }
 
