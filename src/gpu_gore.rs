@@ -59,6 +59,7 @@ use winit::{
 };
 
 #[repr(C)]
+#[derive(Clone, Debug)]
 pub struct BufferReadParams {
     height: i32,
     width: i32,
@@ -541,8 +542,8 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         }
         let invocation_size = [(dims[0] + 31) / 32, (dims[1] + 31) / 32, 1];
         let buffer_read_params = BufferReadParams {
-            height: 0x7fffffff as i32,
-            width: 0x7fffffff as i32,
+            height: dims[1] as i32,
+            width: dims[0] as i32,
         };
         loop {
             let (image_idx, suboptimal, acquire_future) =
@@ -566,7 +567,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                     .push_constants(
                         self.xblur.pipeline.layout().clone(),
                         0,
-                        &buffer_read_params,
+                        buffer_read_params.clone(),
                         )
                     .dispatch(invocation_size)
                     .expect("could not dispatch compute operation!");
@@ -590,7 +591,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                   .push_constants(
                       self.cells.pipeline.layout().clone(),
                       0,
-                      &buffer_read_params,
+                      buffer_read_params.clone(),
                   )
                   .dispatch(invocation_size)
                   .expect("could not dispatch compute operation!");
@@ -617,7 +618,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                   .push_constants(
                       self.blit.pipeline.layout().clone(),
                       0,
-                      &buffer_read_params,
+                      buffer_read_params.clone(),
                   )
                   .dispatch(invocation_size)
                   .expect("could not dispatch compute operation!");
