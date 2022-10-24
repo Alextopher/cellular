@@ -24,11 +24,13 @@ void main() {
   }
   int offset = coords.y * constants.width + coords.x;
   int loop_stride = constants.width - 1;
-  vec4 blur_output = vec4(0.0, 0.0, 0.0, 0.0);
+  vec4 big_output = vec4(0.0, 0.0, 0.0, 0.0);
+  vec4 small_output = vec4(0.0, 0.0, 0.0, 0.0);
   int lowx = coords.x, highx = coords.x;
   int lowoff = offset, highoff = offset;
   for (int i = 0; i < num_steps; i++) {
-    blur_output += weights[i] * (arena[lowoff] + arena[highoff]);
+    big_output += big_weights[i] * (arena[lowoff] + arena[highoff]);
+    small_output += small_weights[i] * (arena[lowoff] + arena[highoff]);
     lowx -= 1;
     lowoff -= 1;
     highx += 1;
@@ -43,5 +45,6 @@ void main() {
     }
   }
 
-  xblur[offset] = blur_output;
+  xblur[2 * offset] = big_output;
+  xblur[2 * offset + 1] = small_output;
 }

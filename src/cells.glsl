@@ -18,13 +18,15 @@ layout(set = 0, binding = 1) buffer ly_xblur {
 #include "kernel.glsl"
 
 vec4 blurred_sample(ivec2 coords, int offset) {
-  int column_stride = constants.width;
-  int loop_stride = constants.width * (constants.height - 1);
-  vec4 blur_output = vec4(0.0, 0.0, 0.0, 0.0);
+  int column_stride = 2 * constants.width;
+  int loop_stride = 2 * constants.width * (constants.height - 1);
+  vec4 big_output = vec4(0.0, 0.0, 0.0, 0.0);
+  vec4 small_output = vec4(0.0, 0.0, 0.0, 0.0);
   int lowy = coords.y, highy = coords.y;
   int lowoff = offset, highoff = offset;
   for (int i = 0; i < num_steps; i++) {
-    blur_output += weights[i] * (xblur[lowoff] + xblur[highoff]);
+    big_output += big_weights[i] * (xblur[lowoff] + xblur[highoff]);
+    small_output += small_weights[i] * (xblur[lowoff + 1] + xblur[highoff + 1]);
     lowoff -= column_stride;
     lowy -= 1;
     highoff += column_stride;
@@ -38,7 +40,7 @@ vec4 blurred_sample(ivec2 coords, int offset) {
       lowoff += loop_stride;
     }
   }
-  return blur_output;
+  return big_output - small_output;
 }
 
 void main() {
@@ -47,14 +49,14 @@ void main() {
     return;
   }
   int offset = coords.y * constants.width + coords.x;
-  vec4 n = blurred_sample(coords, offset);
+  vec4 n = blurred_sample(coords, 2 * offset);
   vec4 self = arena[offset];
-  vec4 neg_self = (vec4(1.0, 1.0, 1.0, 1.0) - self);
-  vec4 clamp_scale = 0.5 + 4.0 * self * neg_self;
-  float step = 5.0;
-  vec4 live_growth = (n - 0.2) * (0.3 - n);
-//  vec4 dead_growth = n - 0.2;
-//  vec4 diff = dead_growth * neg_self + live_growth * self;
-  arena[offset] = clamp(self + live_growth * step, 0.0, 1.0);
+  float step = 0.02;
+  float two_sigma = 2.0 * 0.1;
+  float mu = 0.3;
+  vec4 diff = n - mu;
+  vec4 factor = 2.0 * exp(- diff * diff / two_sigma) - 1.0;
+  vec4 result = clamp(self + factor * step, 0.0, 1.0);
+  arena[offset] = vec4(result.x, n.x, -n.x, 0.0);
 }
 

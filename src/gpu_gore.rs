@@ -402,15 +402,15 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             transfer_dst: true,
             .. BufferUsage::none()
         };
-        let mkbuf = || {
+        let mkbuf = |factor| {
             DeviceLocalBuffer::array(
                 device.clone(),
-                (dims[0] * dims[1] * 4) as DeviceSize,
+                (dims[0] * dims[1] * factor) as DeviceSize,
                 usage,
                 [qf],
                 ).expect("could not create a GPU buffer!")
         };
-        (mkbuf(), mkbuf())
+        (mkbuf(4), mkbuf(8))
     }
 
     fn make_cells_desc_set(device: Arc<Device>, arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
