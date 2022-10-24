@@ -26,8 +26,8 @@ use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 use super::DEFAULT_DIMS;
-use vulkano::buffer::{DeviceLocalBuffer, BufferUsage};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyImageInfo, PrimaryCommandBuffer};
+use vulkano::buffer::{DeviceLocalBuffer, BufferUsage, cpu_access::CpuAccessibleBuffer};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyImageInfo, PrimaryCommandBuffer, CopyBufferInfoTyped};
 use vulkano::descriptor_set::{
     layout::DescriptorSetLayout, persistent::PersistentDescriptorSet, WriteDescriptorSet,
 };
@@ -399,6 +399,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     ) -> (Arc<DeviceLocalBuffer<[f32]>>, Arc<DeviceLocalBuffer<[f32]>>) {
         let usage = BufferUsage {
             storage_buffer: true,
+            transfer_dst: true,
             .. BufferUsage::none()
         };
         let mkbuf = || {
@@ -534,6 +535,43 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 fmt,
                 )
             ).collect();
+    }
+
+    pub fn randomize_buffer(&mut self, dims: [u32; 2]) {
+        let mut trng = rand::thread_rng();
+        let data = (std::iter::repeat_with(|| trng.gen::<f32>())).take((dims[0] * dims[1]* 4) as usize).collect::<Vec<_>>();
+        let usage = BufferUsage {
+            transfer_src: true,
+            .. BufferUsage::none()
+        };
+        let temp_buf = CpuAccessibleBuffer::from_iter(
+            self.device.clone(),
+            usage,
+            false,
+            data.into_iter(),
+            )
+            .expect("could not create CPU-accessible buffer");
+        let mut builder = AutoCommandBufferBuilder::primary(
+            self.device.clone(),
+            self.compute_queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+            .expect("could not make command buffer builder for buffer randomization!");
+        builder
+            .copy_buffer(
+                CopyBufferInfoTyped::buffers(temp_buf, self.arena_buffer.clone())
+                )
+            .expect("could not copy buffer");
+        let cmd_buf = builder
+            .build()
+            .expect("could not build command buffer for randomization!");
+        vulkano::sync::now(self.device.clone())
+            .then_execute(self.compute_queue.clone(), cmd_buf)
+            .expect("could not execute command queue!")
+            .then_signal_fence_and_flush()
+            .expect("could not flush future!")
+            .wait(None)
+            .expect("could not wait on future!");
     }
 
     pub fn do_frame(&mut self, sfc: &Arc<Surface<W>>, dims: [u32; 2]) {

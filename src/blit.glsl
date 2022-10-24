@@ -20,6 +20,6 @@ void main() {
   }
   int offset = coords.y * constants.width + coords.x;
   vec4 c = arena[offset];
-  imageStore(swapchain, coords, vec4(c.xyz, 1.0));
+  imageStore(swapchain, coords, vec4(c.xxx, 1.0));
 }
 

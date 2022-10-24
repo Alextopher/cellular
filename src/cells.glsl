@@ -49,12 +49,12 @@ void main() {
   int offset = coords.y * constants.width + coords.x;
   vec4 n = blurred_sample(coords, offset);
   vec4 self = arena[offset];
-//  vec4 neg_self = (vec4(1.0, 1.0, 1.0, 1.0) - self);
-//  vec4 clamp_scale = 0.5 + 4.0 * self * neg_self;
-  float step = 0.9;
-  vec4 live_growth = (n - 0.2) * (0.5 - n);
+  vec4 neg_self = (vec4(1.0, 1.0, 1.0, 1.0) - self);
+  vec4 clamp_scale = 0.5 + 4.0 * self * neg_self;
+  float step = 5.0;
+  vec4 live_growth = (n - 0.2) * (0.3 - n);
 //  vec4 dead_growth = n - 0.2;
 //  vec4 diff = dead_growth * neg_self + live_growth * self;
-  arena[offset] = self + live_growth * step;
+  arena[offset] = clamp(self + live_growth * step, 0.0, 1.0);
 }
 

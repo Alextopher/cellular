@@ -45,8 +45,8 @@ impl VulkanWindow {
     fn init() -> Self {
         let inst = VulkanData::<()>::init_vk_instance();
         let (sfc, el) = Self::init_winit(&inst);
-        let vk = VulkanData::init(inst, sfc.clone());
-        //vk.scramble(DEFAULT_DIMS);
+        let mut vk = VulkanData::init(inst, sfc.clone());
+        vk.randomize_buffer(DEFAULT_DIMS);
         Self { sfc, el, vk }
     }
 
@@ -117,7 +117,7 @@ impl VulkanWindow {
                     let dims = [size.width, size.height];
                     vk.rebuild_swapchain(&sfc, dims);
                     vk.rebuild_storage(dims);
-                    //vk.scramble(dims);
+                    vk.randomize_buffer(dims);
                     step_counter = 0;
                 }
                 Event::RedrawRequested(_) => {
