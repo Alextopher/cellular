@@ -22,6 +22,7 @@ mod blit_shader {
 }
 
 use super::DEFAULT_DIMS;
+use colored::Colorize;
 use rand::Rng;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
@@ -111,10 +112,11 @@ impl QueueFamilies {
 }
 
 const VALIDATION_LAYERS: &[&str] = &[
-    //    "VK_LAYER_LUNARG_core_validation",
-    //    "VK_LAYER_KHRONOS_validation",
-    //    "VK_LAYER_LUNARG_standard_validation",
-    //    "VK_LAYER_LUNARG_parameter_validation",
+//    "VK_LAYER_LUNARG_core_validation",
+    "VK_LAYER_KHRONOS_validation",
+//    "VK_LAYER_LUNARG_api_dump",
+//    "VK_LAYER_LUNARG_standard_validation",
+//    "VK_LAYER_LUNARG_parameter_validation",
 ];
 const USE_VALIDATION_LAYERS: bool = true;
 
@@ -248,11 +250,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     }
 
     pub fn init_vk_instance() -> Arc<Instance> {
-        //let sup_ext = InstanceExtensions::supported_by_core()
-        //    .expect("Unable to retrieve supported Vulkan extensions");
-        //println!("supported Vulkan extensions: {:?}", sup_ext);
-
         let lib = VulkanLibrary::new().expect("no Vulkan library found!");
+        let sup_ext = lib.layer_properties()
+            .expect("Unable to retrieve supported Vulkan extensions")
+            .map(|p| p.name().into());
+        println!("supported Vulkan extensions: {:?}", sup_ext.collect::<Vec<String>>());
         let mut info = InstanceCreateInfo {
             enabled_extensions: vulkano_win::required_extensions(&lib),
             application_name: Some("ultimate".into()),
@@ -686,7 +688,10 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 .expect(":(");
             // not sure wh it is necessary to force the last operation to
             // complete first. maybe an api bug?
-            let present_info = PresentInfo::swapchain(self.swapchain.clone());
+            let present_info = PresentInfo {
+                index: image_idx,
+                .. PresentInfo::swapchain(self.swapchain.clone())
+            };
             let frame_future = vulkano::sync::now(self.device.clone())
                 .then_execute(self.compute_queue.clone(), cells_buffer)
                 .expect("could not queue execution of command buffer!")
