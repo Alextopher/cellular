@@ -5,6 +5,7 @@ extern crate winit;
 
 mod gpu_gore;
 
+use gpu_gore::VulkanData;
 use std::sync::Arc;
 use vulkano::instance::Instance;
 use vulkano::swapchain::Surface;
@@ -15,7 +16,6 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
-use gpu_gore::{VulkanData};
 
 use rand::Rng;
 
@@ -131,13 +131,13 @@ impl VulkanWindow {
                     step_counter += 1;
                     let size = sfc.window().inner_size();
                     let dims = [size.width, size.height];
-//                    let phase = step_counter as f32 * 0.001 * std::f32::consts::TAU;
-//                    let warp = |x| 350.0 * (0.7 - f32::exp(1.0 * f32::sin(x)));
-//                    let wide = warp(phase);
-//                    let narrow = warp(phase - std::f32::consts::FRAC_PI_2);
+                    //                    let phase = step_counter as f32 * 0.001 * std::f32::consts::TAU;
+                    //                    let warp = |x| 350.0 * (0.7 - f32::exp(1.0 * f32::sin(x)));
+                    //                    let wide = warp(phase);
+                    //                    let narrow = warp(phase - std::f32::consts::FRAC_PI_2);
                     if elapsed > last_report_elapsed + 2.0 {
-                      println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}");
-                      last_report_elapsed = elapsed;
+                        println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}");
+                        last_report_elapsed = elapsed;
                     }
                     vk.do_frame(&sfc, dims);
                 }

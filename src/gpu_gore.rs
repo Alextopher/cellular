@@ -33,8 +33,8 @@ use vulkano::descriptor_set::{
     layout::DescriptorSetLayout, persistent::PersistentDescriptorSet, WriteDescriptorSet,
 };
 use vulkano::device::{
-    physical::{PhysicalDevice},
-    Device, DeviceCreateInfo, DeviceExtensions, Features, Queue, QueueCreateInfo,
+    physical::PhysicalDevice, Device, DeviceCreateInfo, DeviceExtensions, Features, Queue,
+    QueueCreateInfo,
 };
 use vulkano::format::Format as ImageFormat;
 use vulkano::image::{
@@ -46,7 +46,8 @@ use vulkano::library::VulkanLibrary;
 use vulkano::pipeline::{compute::ComputePipeline, Pipeline, PipelineBindPoint};
 use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{
-    self, CompositeAlpha, Surface, SurfaceCapabilities, SurfaceInfo, Swapchain, SwapchainCreateInfo, PresentInfo,
+    self, CompositeAlpha, PresentInfo, Surface, SurfaceCapabilities, SurfaceInfo, Swapchain,
+    SwapchainCreateInfo,
 };
 use vulkano::sync::{GpuFuture, Sharing};
 use vulkano::DeviceSize;
@@ -112,18 +113,19 @@ impl QueueFamilies {
 }
 
 const VALIDATION_LAYERS: &[&str] = &[
-//    "VK_LAYER_LUNARG_core_validation",
+    //    "VK_LAYER_LUNARG_core_validation",
     "VK_LAYER_KHRONOS_validation",
-//    "VK_LAYER_LUNARG_api_dump",
-//    "VK_LAYER_LUNARG_standard_validation",
-//    "VK_LAYER_LUNARG_parameter_validation",
+    //    "VK_LAYER_LUNARG_api_dump",
+    //    "VK_LAYER_LUNARG_standard_validation",
+    //    "VK_LAYER_LUNARG_parameter_validation",
 ];
 const USE_VALIDATION_LAYERS: bool = true;
 
 impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     pub fn init(inst: Arc<Instance>, sfc: Arc<Surface<W>>) -> Self {
         use std::io::Write;
-        let device_idxs = inst.enumerate_physical_devices()
+        let device_idxs = inst
+            .enumerate_physical_devices()
             .expect("could not enumerate devices!")
             .enumerate()
             .filter_map(|(i, dev)| {
@@ -174,7 +176,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 }
             }
         };
-        let phy_dev = inst.enumerate_physical_devices().unwrap().nth(device_idx).unwrap();
+        let phy_dev = inst
+            .enumerate_physical_devices()
+            .unwrap()
+            .nth(device_idx)
+            .unwrap();
         let swp_caps = phy_dev
             .surface_capabilities(sfc.as_ref(), SurfaceInfo::default())
             .expect("unable to determine capabilities of surface with device!");
@@ -251,10 +257,14 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
 
     pub fn init_vk_instance() -> Arc<Instance> {
         let lib = VulkanLibrary::new().expect("no Vulkan library found!");
-        let sup_ext = lib.layer_properties()
+        let sup_ext = lib
+            .layer_properties()
             .expect("Unable to retrieve supported Vulkan extensions")
             .map(|p| p.name().into());
-        println!("supported Vulkan extensions: {:?}", sup_ext.collect::<Vec<String>>());
+        println!(
+            "supported Vulkan extensions: {:?}",
+            sup_ext.collect::<Vec<String>>()
+        );
         let mut info = InstanceCreateInfo {
             enabled_extensions: vulkano_win::required_extensions(&lib),
             application_name: Some("ultimate".into()),
@@ -263,7 +273,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 minor: 0,
                 patch: 0,
             },
-        .. Default::default()
+            ..Default::default()
         };
 
         if USE_VALIDATION_LAYERS {
@@ -284,7 +294,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         Features {
             shader_int16: true,
             shader_int64: true,
-            .. Features::empty()
+            ..Features::empty()
         }
     }
 
@@ -308,7 +318,10 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .into_iter()
             .collect::<HashSet<usize>>()
             .into_iter()
-            .map(|i| QueueCreateInfo { queue_family_index: i as u32, .. Default::default() })
+            .map(|i| QueueCreateInfo {
+                queue_family_index: i as u32,
+                ..Default::default()
+            })
             .collect::<Vec<_>>();
         let dci = DeviceCreateInfo {
             enabled_extensions: Self::required_device_extensions(),
@@ -417,7 +430,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         let usage = BufferUsage {
             storage_buffer: true,
             transfer_dst: true,
-            .. BufferUsage::empty()
+            ..BufferUsage::empty()
         };
         let mkbuf = |factor| {
             DeviceLocalBuffer::array(
@@ -477,7 +490,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             subresource_range: ImageSubresourceRange {
                 aspects: ImageAspects {
                     color: true,
-                    .. ImageAspects::empty()
+                    ..ImageAspects::empty()
                 },
                 mip_levels: 0..1,
                 array_layers: 0..1,
@@ -561,7 +574,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .collect::<Vec<_>>();
         let usage = BufferUsage {
             transfer_src: true,
-            .. BufferUsage::empty()
+            ..BufferUsage::empty()
         };
         let temp_buf =
             CpuAccessibleBuffer::from_iter(self.device.clone(), usage, false, data.into_iter())
@@ -630,11 +643,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                     .expect("could not build blur command buffer!")
             };
             let cells_buffer = {
-              let mut builder = AutoCommandBufferBuilder::primary(
-                self.device.clone(),
-                self.compute_queue.queue_family_index(),
-                CommandBufferUsage::OneTimeSubmit,
-              )
+                let mut builder = AutoCommandBufferBuilder::primary(
+                    self.device.clone(),
+                    self.compute_queue.queue_family_index(),
+                    CommandBufferUsage::OneTimeSubmit,
+                )
                 .expect("could not make command buffer builder!");
                 builder
                     .bind_pipeline_compute(self.cells.pipeline.clone())
@@ -655,11 +668,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 buffer
             };
             let blit_buffer = {
-              let mut builder = AutoCommandBufferBuilder::primary(
-                self.device.clone(),
-                self.compute_queue.queue_family_index(),
-                CommandBufferUsage::OneTimeSubmit,
-              )
+                let mut builder = AutoCommandBufferBuilder::primary(
+                    self.device.clone(),
+                    self.compute_queue.queue_family_index(),
+                    CommandBufferUsage::OneTimeSubmit,
+                )
                 .expect("could not make command buffer builder!");
                 builder
                     .bind_pipeline_compute(self.blit.pipeline.clone())
@@ -690,7 +703,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             // complete first. maybe an api bug?
             let present_info = PresentInfo {
                 index: image_idx,
-                .. PresentInfo::swapchain(self.swapchain.clone())
+                ..PresentInfo::swapchain(self.swapchain.clone())
             };
             let frame_future = vulkano::sync::now(self.device.clone())
                 .then_execute(self.compute_queue.clone(), cells_buffer)
@@ -698,10 +711,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 .then_execute(self.compute_queue.clone(), blit_buffer)
                 .expect("could not queue execution of command buffer!")
                 .then_signal_semaphore()
-                .then_swapchain_present(
-                    self.present_queue.clone(),
-                    present_info,
-                );
+                .then_swapchain_present(self.present_queue.clone(), present_info);
             let result = frame_future.flush();
             if let Err(vulkano::sync::FlushError::OutOfDate) = result {
                 self.rebuild_swapchain(sfc, dims);
