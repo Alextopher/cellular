@@ -32,7 +32,7 @@ use vulkano::descriptor_set::{
     layout::DescriptorSetLayout, persistent::PersistentDescriptorSet, WriteDescriptorSet,
 };
 use vulkano::device::{
-    physical::{PhysicalDevice, QueueFamily},
+    physical::{PhysicalDevice},
     Device, DeviceCreateInfo, DeviceExtensions, Features, Queue, QueueCreateInfo,
 };
 use vulkano::format::Format as ImageFormat;
@@ -41,16 +41,17 @@ use vulkano::image::{
     ImageAspects, ImageSubresourceRange, ImageUsage, SwapchainImage,
 };
 use vulkano::instance::{Instance, InstanceCreateInfo, Version as VkVersion};
+use vulkano::library::VulkanLibrary;
 use vulkano::pipeline::{compute::ComputePipeline, Pipeline, PipelineBindPoint};
 use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{
-    self, CompositeAlpha, Surface, SurfaceCapabilities, SurfaceInfo, Swapchain, SwapchainCreateInfo,
+    self, CompositeAlpha, Surface, SurfaceCapabilities, SurfaceInfo, Swapchain, SwapchainCreateInfo, PresentInfo,
 };
 use vulkano::sync::{GpuFuture, Sharing};
 use vulkano::DeviceSize;
 
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BufferReadParams {
     height: i32,
     width: i32,
@@ -98,11 +99,11 @@ impl QueueFamilies {
     }
 
     fn populate<W>(&mut self, dev: &PhysicalDevice, surface: &Arc<Surface<W>>) {
-        for (i, qf) in dev.queue_families().enumerate() {
-            if qf.supports_compute() {
+        for (i, qf) in dev.queue_family_properties().into_iter().enumerate() {
+            if qf.queue_flags.compute {
                 self.compute_idx = Some(i);
             }
-            if qf.supports_surface(surface).unwrap() {
+            if dev.surface_support(i as u32, surface).unwrap() {
                 self.present_idx = Some(i);
             }
         }
@@ -120,7 +121,8 @@ const USE_VALIDATION_LAYERS: bool = true;
 impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     pub fn init(inst: Arc<Instance>, sfc: Arc<Surface<W>>) -> Self {
         use std::io::Write;
-        let device_idxs = PhysicalDevice::enumerate(&inst)
+        let device_idxs = inst.enumerate_physical_devices()
+            .expect("could not enumerate devices!")
             .enumerate()
             .filter_map(|(i, dev)| {
                 if Self::check_physical_device(&dev, &sfc) {
@@ -170,7 +172,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 }
             }
         };
-        let phy_dev = PhysicalDevice::from_index(&inst, device_idx).unwrap();
+        let phy_dev = inst.enumerate_physical_devices().unwrap().nth(device_idx).unwrap();
         let swp_caps = phy_dev
             .surface_capabilities(sfc.as_ref(), SurfaceInfo::default())
             .expect("unable to determine capabilities of surface with device!");
@@ -196,8 +198,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             DEFAULT_DIMS,
         );
         let image_format = swapchain.image_format();
-        let (arena_buffer, xblur_buffer) =
-            Self::make_storage(device.clone(), compute_queue.family(), DEFAULT_DIMS);
+        let (arena_buffer, xblur_buffer) = Self::make_storage(
+            device.clone(),
+            compute_queue.queue_family_index(),
+            DEFAULT_DIMS,
+        );
         let cells_desc_set = Self::make_cells_desc_set(
             device.clone(),
             arena_buffer.clone(),
@@ -247,26 +252,29 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         //    .expect("Unable to retrieve supported Vulkan extensions");
         //println!("supported Vulkan extensions: {:?}", sup_ext);
 
-        let mut info = InstanceCreateInfo::default();
-        info.enabled_extensions = vulkano_win::required_extensions();
-        info.application_name = Some("mesmerise".into());
-        info.application_version = VkVersion {
-            major: 0,
-            minor: 0,
-            patch: 0,
+        let lib = VulkanLibrary::new().expect("no Vulkan library found!");
+        let mut info = InstanceCreateInfo {
+            enabled_extensions: vulkano_win::required_extensions(&lib),
+            application_name: Some("ultimate".into()),
+            application_version: VkVersion {
+                major: 0,
+                minor: 0,
+                patch: 0,
+            },
+        .. Default::default()
         };
 
         if USE_VALIDATION_LAYERS {
             info.enabled_layers = VALIDATION_LAYERS.iter().map(|s| s.to_string()).collect();
         }
-        Instance::new(info).expect("could not create Vulkan instance!")
+        Instance::new(lib, info).expect("could not create Vulkan instance!")
     }
 
     const fn required_device_extensions() -> DeviceExtensions {
         DeviceExtensions {
             khr_swapchain: true,
             khr_swapchain_mutable_format: true,
-            ..DeviceExtensions::none()
+            ..DeviceExtensions::empty()
         }
     }
 
@@ -274,7 +282,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         Features {
             shader_int16: true,
             shader_int64: true,
-            ..Features::none()
+            .. Features::empty()
         }
     }
 
@@ -284,13 +292,13 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         let sup_ext = device.supported_extensions();
         let sup_feats = device.supported_features();
         qfs.is_complete()
-            && Self::required_device_extensions().difference(&sup_ext) == DeviceExtensions::none()
-            && Self::required_device_features().difference(&sup_feats) == Features::none()
+            && Self::required_device_extensions().difference(&sup_ext) == DeviceExtensions::empty()
+            && Self::required_device_features().difference(&sup_feats) == Features::empty()
     }
 
     fn create_device(
         sfc: &Arc<Surface<W>>,
-        phy_dev: PhysicalDevice,
+        phy_dev: Arc<PhysicalDevice>,
     ) -> (Arc<Device>, QueueFamilies, Arc<Queue>, Arc<Queue>) {
         let mut qis = QueueFamilies::new();
         qis.populate(&phy_dev, &sfc);
@@ -298,7 +306,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .into_iter()
             .collect::<HashSet<usize>>()
             .into_iter()
-            .map(|i| QueueCreateInfo::family(phy_dev.queue_family_by_id(i as u32).unwrap()))
+            .map(|i| QueueCreateInfo { queue_family_index: i as u32, .. Default::default() })
             .collect::<Vec<_>>();
         let dci = DeviceCreateInfo {
             enabled_extensions: Self::required_device_extensions(),
@@ -347,8 +355,8 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         dims: [u32; 2],
     ) -> (Arc<Swapchain<W>>, Vec<Arc<SwapchainImage<W>>>) {
         let sharing = {
-            let cmpqfid = cmpq.family().id();
-            let pstqfid = pstq.family().id();
+            let cmpqfid = cmpq.queue_family_index();
+            let pstqfid = pstq.queue_family_index();
             if cmpqfid == pstqfid {
                 Sharing::Exclusive
             } else {
@@ -371,7 +379,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             storage: true,
             color_attachment: true,
             transfer_dst: true,
-            ..ImageUsage::none()
+            ..ImageUsage::empty()
         };
         let dims = swp_cap.current_extent.unwrap_or(dims);
         let supp_fmts = device
@@ -401,13 +409,13 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     // make the GPU buffers: the arena image and the intermittent blur buffer
     fn make_storage(
         device: Arc<Device>,
-        qf: QueueFamily,
+        qf: u32,
         dims: [u32; 2],
     ) -> (Arc<DeviceLocalBuffer<[f32]>>, Arc<DeviceLocalBuffer<[f32]>>) {
         let usage = BufferUsage {
             storage_buffer: true,
             transfer_dst: true,
-            ..BufferUsage::none()
+            .. BufferUsage::empty()
         };
         let mkbuf = |factor| {
             DeviceLocalBuffer::array(
@@ -467,7 +475,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             subresource_range: ImageSubresourceRange {
                 aspects: ImageAspects {
                     color: true,
-                    ..ImageAspects::none()
+                    .. ImageAspects::empty()
                 },
                 mip_levels: 0..1,
                 array_layers: 0..1,
@@ -511,8 +519,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     // rebuild all of the GPU buffers, in case e.g. their size has changed
     pub fn rebuild_storage(&mut self, dims: [u32; 2]) {
         let fmt = self.swapchain.image_format();
-        (self.arena_buffer, self.xblur_buffer) =
-            Self::make_storage(self.device.clone(), self.compute_queue.family(), dims);
+        (self.arena_buffer, self.xblur_buffer) = Self::make_storage(
+            self.device.clone(),
+            self.compute_queue.queue_family_index(),
+            dims,
+        );
         self.cells_desc_set = Self::make_cells_desc_set(
             self.device.clone(),
             self.arena_buffer.clone(),
@@ -548,14 +559,14 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .collect::<Vec<_>>();
         let usage = BufferUsage {
             transfer_src: true,
-            ..BufferUsage::none()
+            .. BufferUsage::empty()
         };
         let temp_buf =
             CpuAccessibleBuffer::from_iter(self.device.clone(), usage, false, data.into_iter())
                 .expect("could not create CPU-accessible buffer");
         let mut builder = AutoCommandBufferBuilder::primary(
             self.device.clone(),
-            self.compute_queue.family(),
+            self.compute_queue.queue_family_index(),
             CommandBufferUsage::OneTimeSubmit,
         )
         .expect("could not make command buffer builder for buffer randomization!");
@@ -593,7 +604,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             let xblur_cmd_buffer = {
                 let mut builder = AutoCommandBufferBuilder::primary(
                     self.device.clone(),
-                    self.compute_queue.family(),
+                    self.compute_queue.queue_family_index(),
                     CommandBufferUsage::OneTimeSubmit,
                 )
                 .expect("could not make command buffer builder!");
@@ -617,11 +628,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                     .expect("could not build blur command buffer!")
             };
             let cells_buffer = {
-                let mut builder = AutoCommandBufferBuilder::primary(
-                    self.device.clone(),
-                    self.compute_queue.family(),
-                    CommandBufferUsage::OneTimeSubmit,
-                )
+              let mut builder = AutoCommandBufferBuilder::primary(
+                self.device.clone(),
+                self.compute_queue.queue_family_index(),
+                CommandBufferUsage::OneTimeSubmit,
+              )
                 .expect("could not make command buffer builder!");
                 builder
                     .bind_pipeline_compute(self.cells.pipeline.clone())
@@ -642,11 +653,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 buffer
             };
             let blit_buffer = {
-                let mut builder = AutoCommandBufferBuilder::primary(
-                    self.device.clone(),
-                    self.compute_queue.family(),
-                    CommandBufferUsage::OneTimeSubmit,
-                )
+              let mut builder = AutoCommandBufferBuilder::primary(
+                self.device.clone(),
+                self.compute_queue.queue_family_index(),
+                CommandBufferUsage::OneTimeSubmit,
+              )
                 .expect("could not make command buffer builder!");
                 builder
                     .bind_pipeline_compute(self.blit.pipeline.clone())
@@ -675,6 +686,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 .expect(":(");
             // not sure wh it is necessary to force the last operation to
             // complete first. maybe an api bug?
+            let present_info = PresentInfo::swapchain(self.swapchain.clone());
             let frame_future = vulkano::sync::now(self.device.clone())
                 .then_execute(self.compute_queue.clone(), cells_buffer)
                 .expect("could not queue execution of command buffer!")
@@ -683,8 +695,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 .then_signal_semaphore()
                 .then_swapchain_present(
                     self.present_queue.clone(),
-                    self.swapchain.clone(),
-                    image_idx,
+                    present_info,
                 );
             let result = frame_future.flush();
             if let Err(vulkano::sync::FlushError::OutOfDate) = result {

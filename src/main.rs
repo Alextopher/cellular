@@ -31,7 +31,7 @@ impl VulkanWindow {
     fn init_winit(inst: &Arc<Instance>) -> (Arc<Surface<Window>>, EventLoop<()>) {
         let el = EventLoop::new();
         let sfc = WindowBuilder::new()
-            .with_title("mesmerise")
+            .with_title("ultimate")
             .with_visible(true)
             .with_inner_size(Size::Physical(PhysicalSize {
                 width: DEFAULT_DIMS[0],
