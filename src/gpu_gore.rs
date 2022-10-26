@@ -22,7 +22,6 @@ mod blit_shader {
 }
 
 use super::DEFAULT_DIMS;
-use colored::Colorize;
 use rand::Rng;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
@@ -60,7 +59,6 @@ pub struct BufferReadParams {
 }
 
 pub struct VulkanData<W> {
-    inst: Arc<Instance>,
     device: Arc<Device>,
     compute_queue: Arc<Queue>,
     present_queue: Arc<Queue>,
@@ -212,13 +210,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             DEFAULT_DIMS,
         );
         let cells_desc_set = Self::make_cells_desc_set(
-            device.clone(),
             arena_buffer.clone(),
             xblur_buffer.clone(),
             cells.desc_set_layout.clone(),
         );
         let xblur_desc_set = Self::make_xblur_desc_set(
-            device.clone(),
             arena_buffer.clone(),
             xblur_buffer.clone(),
             xblur.desc_set_layout.clone(),
@@ -228,7 +224,6 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .cloned()
             .map(|si| {
                 Self::make_blit_desc_set(
-                    device.clone(),
                     arena_buffer.clone(),
                     si,
                     blit.desc_set_layout.clone(),
@@ -237,7 +232,6 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             })
             .collect();
         Self {
-            inst,
             device,
             compute_queue,
             present_queue,
@@ -445,7 +439,6 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     }
 
     fn make_cells_desc_set(
-        device: Arc<Device>,
         arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         desc_set_layout: Arc<DescriptorSetLayout>,
@@ -462,7 +455,6 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     }
 
     fn make_xblur_desc_set(
-        device: Arc<Device>,
         arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         desc_set_layout: Arc<DescriptorSetLayout>,
@@ -479,7 +471,6 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     }
 
     fn make_blit_desc_set(
-        device: Arc<Device>,
         arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         swapchain_image: Arc<SwapchainImage<W>>,
         desc_set_layout: Arc<DescriptorSetLayout>,
@@ -540,13 +531,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             dims,
         );
         self.cells_desc_set = Self::make_cells_desc_set(
-            self.device.clone(),
             self.arena_buffer.clone(),
             self.xblur_buffer.clone(),
             self.cells.desc_set_layout.clone(),
         );
         self.xblur_desc_set = Self::make_xblur_desc_set(
-            self.device.clone(),
             self.arena_buffer.clone(),
             self.xblur_buffer.clone(),
             self.xblur.desc_set_layout.clone(),
@@ -557,7 +546,6 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .cloned()
             .map(|si| {
                 Self::make_blit_desc_set(
-                    self.device.clone(),
                     self.arena_buffer.clone(),
                     si,
                     self.blit.desc_set_layout.clone(),

@@ -17,8 +17,6 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use rand::Rng;
-
 const DEFAULT_DIMS: [u32; 2] = [100, 100];
 
 struct VulkanWindow {
@@ -99,7 +97,7 @@ impl VulkanWindow {
                     println!("new modifier set: {:?}", mstate);
                 }
                 Event::WindowEvent {
-                    event: WindowEvent::CursorMoved { position: pos, .. },
+                    event: WindowEvent::CursorMoved { position: _pos, .. },
                     ..
                 } => {}
                 Event::WindowEvent {
@@ -136,7 +134,7 @@ impl VulkanWindow {
                     //                    let wide = warp(phase);
                     //                    let narrow = warp(phase - std::f32::consts::FRAC_PI_2);
                     if elapsed > last_report_elapsed + 2.0 {
-                        println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}");
+                        println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}, frames since reset: {step_counter}");
                         last_report_elapsed = elapsed;
                     }
                     vk.do_frame(&sfc, dims);
