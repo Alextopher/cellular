@@ -21,13 +21,13 @@ mod blit_shader {
     }
 }
 
+use super::DEFAULT_DIMS;
 use rand::Rng;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
-use super::DEFAULT_DIMS;
-use vulkano::buffer::{DeviceLocalBuffer, BufferUsage, cpu_access::CpuAccessibleBuffer};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyImageInfo, PrimaryCommandBuffer, CopyBufferInfoTyped};
+use vulkano::buffer::{cpu_access::CpuAccessibleBuffer, BufferUsage, DeviceLocalBuffer};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfoTyped};
 use vulkano::descriptor_set::{
     layout::DescriptorSetLayout, persistent::PersistentDescriptorSet, WriteDescriptorSet,
 };
@@ -35,28 +35,19 @@ use vulkano::device::{
     physical::{PhysicalDevice, QueueFamily},
     Device, DeviceCreateInfo, DeviceExtensions, Features, Queue, QueueCreateInfo,
 };
-use vulkano::DeviceSize;
 use vulkano::format::Format as ImageFormat;
 use vulkano::image::{
     view::{ImageView, ImageViewCreateInfo},
-    ImageAspects, ImageCreateFlags, ImageDimensions, ImageSubresourceRange, ImageUsage,
-    StorageImage, SwapchainImage,
+    ImageAspects, ImageSubresourceRange, ImageUsage, SwapchainImage,
 };
 use vulkano::instance::{Instance, InstanceCreateInfo, Version as VkVersion};
 use vulkano::pipeline::{compute::ComputePipeline, Pipeline, PipelineBindPoint};
-use vulkano::sampler::{Sampler, SamplerCreateInfo};
 use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{
     self, CompositeAlpha, Surface, SurfaceCapabilities, SurfaceInfo, Swapchain, SwapchainCreateInfo,
 };
 use vulkano::sync::{GpuFuture, Sharing};
-use vulkano_win::VkSurfaceBuild;
-use winit::{
-    dpi::{PhysicalPosition, PhysicalSize, Size},
-    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
-};
+use vulkano::DeviceSize;
 
 #[repr(C)]
 #[derive(Clone, Debug)]
@@ -84,8 +75,8 @@ pub struct VulkanData<W> {
 }
 
 struct ShaderModData {
-  pipeline: Arc<ComputePipeline>,
-  desc_set_layout: Arc<DescriptorSetLayout>,
+    pipeline: Arc<ComputePipeline>,
+    desc_set_layout: Arc<DescriptorSetLayout>,
 }
 
 #[derive(Debug)]
@@ -184,9 +175,18 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .surface_capabilities(sfc.as_ref(), SurfaceInfo::default())
             .expect("unable to determine capabilities of surface with device!");
         let (device, _qis, compute_queue, present_queue) = Self::create_device(&sfc, phy_dev);
-        let cells = Self::make_pipeline(&device, cells_shader::load(device.clone()).expect("could not load cells shader module!"));
-        let xblur = Self::make_pipeline(&device, xblur_shader::load(device.clone()).expect("could not load xblur shader module!"));
-        let blit = Self::make_pipeline(&device, blit_shader::load(device.clone()).expect("could not load blit shader module!"));
+        let cells = Self::make_pipeline(
+            &device,
+            cells_shader::load(device.clone()).expect("could not load cells shader module!"),
+        );
+        let xblur = Self::make_pipeline(
+            &device,
+            xblur_shader::load(device.clone()).expect("could not load xblur shader module!"),
+        );
+        let blit = Self::make_pipeline(
+            &device,
+            blit_shader::load(device.clone()).expect("could not load blit shader module!"),
+        );
         let (swapchain, swapchain_images) = Self::make_swapchain(
             &device,
             &sfc,
@@ -196,26 +196,33 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             DEFAULT_DIMS,
         );
         let image_format = swapchain.image_format();
-        let (arena_buffer, xblur_buffer) = Self::make_storage(
-            device.clone(),
-            compute_queue.family(),
-            DEFAULT_DIMS,
-        );
+        let (arena_buffer, xblur_buffer) =
+            Self::make_storage(device.clone(), compute_queue.family(), DEFAULT_DIMS);
         let cells_desc_set = Self::make_cells_desc_set(
-          device.clone(),
-          arena_buffer.clone(),
-          xblur_buffer.clone(),
-          cells.desc_set_layout.clone(),
-          );
+            device.clone(),
+            arena_buffer.clone(),
+            xblur_buffer.clone(),
+            cells.desc_set_layout.clone(),
+        );
         let xblur_desc_set = Self::make_xblur_desc_set(
-          device.clone(),
-          arena_buffer.clone(),
-          xblur_buffer.clone(),
-          xblur.desc_set_layout.clone(),
-          );
-        let blit_desc_sets = swapchain_images.iter().cloned().map(|si|
-            Self::make_blit_desc_set(device.clone(), arena_buffer.clone(), si, blit.desc_set_layout.clone(), image_format)
-            ).collect();
+            device.clone(),
+            arena_buffer.clone(),
+            xblur_buffer.clone(),
+            xblur.desc_set_layout.clone(),
+        );
+        let blit_desc_sets = swapchain_images
+            .iter()
+            .cloned()
+            .map(|si| {
+                Self::make_blit_desc_set(
+                    device.clone(),
+                    arena_buffer.clone(),
+                    si,
+                    blit.desc_set_layout.clone(),
+                    image_format,
+                )
+            })
+            .collect();
         Self {
             inst,
             device,
@@ -255,7 +262,6 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         Instance::new(info).expect("could not create Vulkan instance!")
     }
 
-
     const fn required_device_extensions() -> DeviceExtensions {
         DeviceExtensions {
             khr_swapchain: true,
@@ -268,7 +274,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         Features {
             shader_int16: true,
             shader_int64: true,
-            .. Features::none()
+            ..Features::none()
         }
     }
 
@@ -327,7 +333,8 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         .expect("could not create compute pipeline");
         ShaderModData {
             pipeline: compute_pipeline,
-            desc_set_layout: desc_set_layout.expect("could not get the descriptor set layout of the pipeline!"),
+            desc_set_layout: desc_set_layout
+                .expect("could not get the descriptor set layout of the pipeline!"),
         }
     }
 
@@ -400,7 +407,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         let usage = BufferUsage {
             storage_buffer: true,
             transfer_dst: true,
-            .. BufferUsage::none()
+            ..BufferUsage::none()
         };
         let mkbuf = |factor| {
             DeviceLocalBuffer::array(
@@ -408,82 +415,77 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 (dims[0] * dims[1] * factor) as DeviceSize,
                 usage,
                 [qf],
-                ).expect("could not create a GPU buffer!")
+            )
+            .expect("could not create a GPU buffer!")
         };
         (mkbuf(4), mkbuf(8))
     }
 
-    fn make_cells_desc_set(device: Arc<Device>, arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
-        xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>, desc_set_layout:
-        Arc<DescriptorSetLayout>) ->
-        Arc<PersistentDescriptorSet> {
+    fn make_cells_desc_set(
+        device: Arc<Device>,
+        arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
+        xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
+        desc_set_layout: Arc<DescriptorSetLayout>,
+    ) -> Arc<PersistentDescriptorSet> {
         let desc_set = PersistentDescriptorSet::new(
             desc_set_layout,
             [
-            WriteDescriptorSet::buffer(
-                0,
-                arena_buffer.clone(),
-            ),
-            WriteDescriptorSet::buffer(
-                1,
-                xblur_buffer.clone(),
-            ),
+                WriteDescriptorSet::buffer(0, arena_buffer.clone()),
+                WriteDescriptorSet::buffer(1, xblur_buffer.clone()),
             ],
         )
         .expect("could not create persistent descriptor set for arena image");
         desc_set
     }
 
-    fn make_xblur_desc_set(device: Arc<Device>, arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
-        xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>, desc_set_layout:
-        Arc<DescriptorSetLayout>) ->
-        Arc<PersistentDescriptorSet> {
+    fn make_xblur_desc_set(
+        device: Arc<Device>,
+        arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
+        xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
+        desc_set_layout: Arc<DescriptorSetLayout>,
+    ) -> Arc<PersistentDescriptorSet> {
         let desc_set = PersistentDescriptorSet::new(
             desc_set_layout,
             [
-            WriteDescriptorSet::buffer(
-                0,
-                arena_buffer.clone(),
-            ),
-            WriteDescriptorSet::buffer(
-                1,
-                xblur_buffer.clone(),
-            ),
+                WriteDescriptorSet::buffer(0, arena_buffer.clone()),
+                WriteDescriptorSet::buffer(1, xblur_buffer.clone()),
             ],
         )
         .expect("could not create persistent descriptor set for arena image");
         desc_set
     }
 
-    fn make_blit_desc_set(device: Arc<Device>, arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
-        swapchain_image: Arc<SwapchainImage<W>>, desc_set_layout: Arc<DescriptorSetLayout>,
-        format: ImageFormat) -> Arc<PersistentDescriptorSet> {
+    fn make_blit_desc_set(
+        device: Arc<Device>,
+        arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
+        swapchain_image: Arc<SwapchainImage<W>>,
+        desc_set_layout: Arc<DescriptorSetLayout>,
+        format: ImageFormat,
+    ) -> Arc<PersistentDescriptorSet> {
         let ivci = ImageViewCreateInfo {
             format: Some(format),
             subresource_range: ImageSubresourceRange {
                 aspects: ImageAspects {
                     color: true,
-                    .. ImageAspects::none()
+                    ..ImageAspects::none()
                 },
                 mip_levels: 0..1,
                 array_layers: 0..1,
             },
-            .. Default::default()
+            ..Default::default()
         };
         let desc_set = PersistentDescriptorSet::new(
             desc_set_layout,
             [
-            WriteDescriptorSet::image_view(
-                0,
-                ImageView::new(swapchain_image, ivci)
-                .expect("could not create image view for swapchain image")),
-            WriteDescriptorSet::buffer(
-                1,
-                arena_buffer.clone(),
+                WriteDescriptorSet::image_view(
+                    0,
+                    ImageView::new(swapchain_image, ivci)
+                        .expect("could not create image view for swapchain image"),
                 ),
-            ]
+                WriteDescriptorSet::buffer(1, arena_buffer.clone()),
+            ],
         )
-            .expect("could not create persistent descriptor set for blit shader");
+        .expect("could not create persistent descriptor set for blit shader");
         desc_set
     }
 
@@ -509,58 +511,59 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     // rebuild all of the GPU buffers, in case e.g. their size has changed
     pub fn rebuild_storage(&mut self, dims: [u32; 2]) {
         let fmt = self.swapchain.image_format();
-        (self.arena_buffer, self.xblur_buffer) = Self::make_storage(
-            self.device.clone(),
-            self.compute_queue.family(),
-            dims,
-        );
+        (self.arena_buffer, self.xblur_buffer) =
+            Self::make_storage(self.device.clone(), self.compute_queue.family(), dims);
         self.cells_desc_set = Self::make_cells_desc_set(
-          self.device.clone(),
-          self.arena_buffer.clone(),
-          self.xblur_buffer.clone(),
-          self.cells.desc_set_layout.clone(),
-          );
+            self.device.clone(),
+            self.arena_buffer.clone(),
+            self.xblur_buffer.clone(),
+            self.cells.desc_set_layout.clone(),
+        );
         self.xblur_desc_set = Self::make_xblur_desc_set(
-          self.device.clone(),
-          self.arena_buffer.clone(),
-          self.xblur_buffer.clone(),
-          self.xblur.desc_set_layout.clone(),
-          );
-        self.blit_desc_sets = self.swapchain_images.iter().cloned().map(|si|
-            Self::make_blit_desc_set(
-                self.device.clone(),
-                self.arena_buffer.clone(),
-                si,
-                self.blit.desc_set_layout.clone(),
-                fmt,
+            self.device.clone(),
+            self.arena_buffer.clone(),
+            self.xblur_buffer.clone(),
+            self.xblur.desc_set_layout.clone(),
+        );
+        self.blit_desc_sets = self
+            .swapchain_images
+            .iter()
+            .cloned()
+            .map(|si| {
+                Self::make_blit_desc_set(
+                    self.device.clone(),
+                    self.arena_buffer.clone(),
+                    si,
+                    self.blit.desc_set_layout.clone(),
+                    fmt,
                 )
-            ).collect();
+            })
+            .collect();
     }
 
     pub fn randomize_buffer(&mut self, dims: [u32; 2]) {
         let mut trng = rand::thread_rng();
-        let data = (std::iter::repeat_with(|| trng.gen::<f32>())).take((dims[0] * dims[1]* 4) as usize).collect::<Vec<_>>();
+        let data = (std::iter::repeat_with(|| trng.gen::<f32>()))
+            .take((dims[0] * dims[1] * 4) as usize)
+            .collect::<Vec<_>>();
         let usage = BufferUsage {
             transfer_src: true,
-            .. BufferUsage::none()
+            ..BufferUsage::none()
         };
-        let temp_buf = CpuAccessibleBuffer::from_iter(
-            self.device.clone(),
-            usage,
-            false,
-            data.into_iter(),
-            )
-            .expect("could not create CPU-accessible buffer");
+        let temp_buf =
+            CpuAccessibleBuffer::from_iter(self.device.clone(), usage, false, data.into_iter())
+                .expect("could not create CPU-accessible buffer");
         let mut builder = AutoCommandBufferBuilder::primary(
             self.device.clone(),
             self.compute_queue.family(),
             CommandBufferUsage::OneTimeSubmit,
         )
-            .expect("could not make command buffer builder for buffer randomization!");
+        .expect("could not make command buffer builder for buffer randomization!");
         builder
-            .copy_buffer(
-                CopyBufferInfoTyped::buffers(temp_buf, self.arena_buffer.clone())
-                )
+            .copy_buffer(CopyBufferInfoTyped::buffers(
+                temp_buf,
+                self.arena_buffer.clone(),
+            ))
             .expect("could not copy buffer");
         let cmd_buf = builder
             .build()
@@ -606,63 +609,61 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                         self.xblur.pipeline.layout().clone(),
                         0,
                         buffer_read_params.clone(),
-                        )
+                    )
                     .dispatch(invocation_size)
                     .expect("could not dispatch compute operation!");
-                builder.build().expect("could not build blur command buffer!")
+                builder
+                    .build()
+                    .expect("could not build blur command buffer!")
             };
             let cells_buffer = {
-              let mut builder = AutoCommandBufferBuilder::primary(
-                self.device.clone(),
-                self.compute_queue.family(),
-                CommandBufferUsage::OneTimeSubmit,
-              )
+                let mut builder = AutoCommandBufferBuilder::primary(
+                    self.device.clone(),
+                    self.compute_queue.family(),
+                    CommandBufferUsage::OneTimeSubmit,
+                )
                 .expect("could not make command buffer builder!");
                 builder
-                  .bind_pipeline_compute(self.cells.pipeline.clone())
-                  .bind_descriptor_sets(
-                    PipelineBindPoint::Compute,
-                    self.cells.pipeline.layout().clone(),
-                    0,
-                    self.cells_desc_set.clone(),
-                  )
-                  .push_constants(
-                      self.cells.pipeline.layout().clone(),
-                      0,
-                      buffer_read_params.clone(),
-                  )
-                  .dispatch(invocation_size)
-                  .expect("could not dispatch compute operation!");
-                let buffer = builder
-                  .build()
-                  .expect("could not build command buffer!");
+                    .bind_pipeline_compute(self.cells.pipeline.clone())
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Compute,
+                        self.cells.pipeline.layout().clone(),
+                        0,
+                        self.cells_desc_set.clone(),
+                    )
+                    .push_constants(
+                        self.cells.pipeline.layout().clone(),
+                        0,
+                        buffer_read_params.clone(),
+                    )
+                    .dispatch(invocation_size)
+                    .expect("could not dispatch compute operation!");
+                let buffer = builder.build().expect("could not build command buffer!");
                 buffer
-                };
+            };
             let blit_buffer = {
-              let mut builder = AutoCommandBufferBuilder::primary(
-                self.device.clone(),
-                self.compute_queue.family(),
-                CommandBufferUsage::OneTimeSubmit,
-              )
+                let mut builder = AutoCommandBufferBuilder::primary(
+                    self.device.clone(),
+                    self.compute_queue.family(),
+                    CommandBufferUsage::OneTimeSubmit,
+                )
                 .expect("could not make command buffer builder!");
                 builder
-                  .bind_pipeline_compute(self.blit.pipeline.clone())
-                  .bind_descriptor_sets(
-                    PipelineBindPoint::Compute,
-                    self.blit.pipeline.layout().clone(),
-                    0,
-                    self.blit_desc_sets[image_idx].clone(),
-                  )
-                  .push_constants(
-                      self.blit.pipeline.layout().clone(),
-                      0,
-                      buffer_read_params.clone(),
-                  )
-                  .dispatch(invocation_size)
-                  .expect("could not dispatch compute operation!");
-                let buffer = builder
-                  .build()
-                  .expect("could not build command buffer!");
+                    .bind_pipeline_compute(self.blit.pipeline.clone())
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Compute,
+                        self.blit.pipeline.layout().clone(),
+                        0,
+                        self.blit_desc_sets[image_idx].clone(),
+                    )
+                    .push_constants(
+                        self.blit.pipeline.layout().clone(),
+                        0,
+                        buffer_read_params.clone(),
+                    )
+                    .dispatch(invocation_size)
+                    .expect("could not dispatch compute operation!");
+                let buffer = builder.build().expect("could not build command buffer!");
                 buffer
             };
             acquire_future
