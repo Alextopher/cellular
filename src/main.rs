@@ -162,7 +162,7 @@ fn main() {
     //nokhwa::nokhwa_initialize(something);
     let mut cam = nokhwa::Camera::new(0, None).expect("could not initialize camera!");
     cam.open_stream().expect("could not open camera stream");
-//    let frame = cam.frame().expect("could not get a camera frame");
+    //    let frame = cam.frame().expect("could not get a camera frame");
     let vw = VulkanWindow::init(cam);
     vw.do_loop();
 }
