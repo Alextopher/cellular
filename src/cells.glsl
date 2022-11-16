@@ -73,22 +73,22 @@ void main() {
   float fade_factor = 0.05;
 
   vec4 two_sigma = 2.0 * vec4(0.05, 0.02, 0.01, 1.0);
-  vec4 mu = vec4(0.2, 0.3, 0.4, 0.0);
+  vec4 mu = camera_value;
   vec4 diff = n - mu;
   vec4 factor = 2.0 * exp(- diff * diff / two_sigma) - 1.0;
   factor = cross_diff * factor;
 
   vec4 cell_diff = factor * step;
-  vec4 cam_diff = (camera_value - step) * blend_factor;
-  float cell_len = length(cell_diff);
-  float cam_len = length(cam_diff);
+//  vec4 cam_diff = (camera_value - step) * blend_factor;
+//  float cell_len = length(cell_diff);
+//  float cam_len = length(cam_diff);
 //  if (cell_len > 1.0 * cam_len) {
 //      cam_diff *= cell_len / cam_len * 1.0;
 //  }
 //  if (cam_len > 1.0 * cell_len) {
 //      cell_diff *= cam_len / cell_len * 1.0;
 //  }
-  vec4 total_diff = cell_diff + cam_diff - fade_factor * self;
+  vec4 total_diff = cell_diff /*+ cam_diff*/ - fade_factor * self;
 
   vec4 result = clamp(self + total_diff, 0.0, 1.0);
   arena[offset] = result;
