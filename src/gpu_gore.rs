@@ -22,6 +22,7 @@ mod blit_shader {
 }
 
 use super::DEFAULT_DIMS;
+use nokhwa::Camera;
 use rand::Rng;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
@@ -38,11 +39,13 @@ use vulkano::device::{
 use vulkano::format::Format as ImageFormat;
 use vulkano::image::{
     view::{ImageView, ImageViewCreateInfo},
-    ImageAspects, ImageSubresourceRange, ImageUsage, SwapchainImage,
+    ImageAspects, ImageCreateFlags, ImageDimensions, ImageSubresourceRange, ImageUsage,
+    StorageImage, SwapchainImage,
 };
 use vulkano::instance::{Instance, InstanceCreateInfo, Version as VkVersion};
 use vulkano::library::VulkanLibrary;
 use vulkano::pipeline::{compute::ComputePipeline, Pipeline, PipelineBindPoint};
+use vulkano::sampler::{Sampler, SamplerCreateInfo};
 use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{
     self, CompositeAlpha, PresentInfo, Surface, SurfaceCapabilities, SurfaceInfo, Swapchain,
@@ -65,6 +68,8 @@ pub struct VulkanData<W> {
     cells: ShaderModData,
     xblur: ShaderModData,
     blit: ShaderModData,
+    camera_buffer: Arc<CpuAccessibleBuffer<[u8]>>,
+    camera_image: Arc<StorageImage>,
     arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
     xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
     swapchain: Arc<Swapchain<W>>,
@@ -120,7 +125,7 @@ const VALIDATION_LAYERS: &[&str] = &[
 const USE_VALIDATION_LAYERS: bool = true;
 
 impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
-    pub fn init(inst: Arc<Instance>, sfc: Arc<Surface<W>>) -> Self {
+    pub fn init(inst: Arc<Instance>, sfc: Arc<Surface<W>>, cam: &mut Camera) -> Self {
         use std::io::Write;
         let device_idxs = inst
             .enumerate_physical_devices()
@@ -204,12 +209,16 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             DEFAULT_DIMS,
         );
         let image_format = swapchain.image_format();
+        let (camera_buffer, camera_image) =
+            Self::make_camera_storage(device.clone(), compute_queue.queue_family_index(), cam);
         let (arena_buffer, xblur_buffer) = Self::make_storage(
             device.clone(),
             compute_queue.queue_family_index(),
             DEFAULT_DIMS,
         );
         let cells_desc_set = Self::make_cells_desc_set(
+            device.clone(),
+            camera_image.clone(),
             arena_buffer.clone(),
             xblur_buffer.clone(),
             cells.desc_set_layout.clone(),
@@ -238,6 +247,8 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             cells,
             xblur,
             blit,
+            camera_buffer,
+            camera_image,
             arena_buffer,
             xblur_buffer,
             swapchain,
@@ -415,6 +426,47 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         (swapchain, swapchain_images)
     }
 
+    // make the camera-related buffer and image
+    fn make_camera_storage(
+        device: Arc<Device>,
+        qf: u32,
+        cam: &mut Camera,
+    ) -> (Arc<CpuAccessibleBuffer<[u8]>>, Arc<StorageImage>) {
+        let nokhwa::Resolution { width_x, height_y } = cam.resolution();
+        let usage = BufferUsage {
+            transfer_src: true,
+            ..BufferUsage::empty()
+        };
+        let buf = CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            usage,
+            false,
+            itertools::repeat_n(0u8, (4 * width_x * height_y) as usize),
+        )
+        .expect("could not create camera buffer!");
+        let dims = ImageDimensions::Dim2d {
+            width: width_x,
+            height: height_y,
+            array_layers: 1,
+        };
+        let usage = ImageUsage {
+            sampled: true,
+            storage: true,
+            transfer_dst: true,
+            ..ImageUsage::empty()
+        };
+        let img = StorageImage::with_usage(
+            device,
+            dims,
+            ImageFormat::B8G8R8A8_UNORM,
+            usage,
+            ImageCreateFlags::empty(),
+            [qf],
+        )
+        .expect("could not create camera image buffer");
+        (buf, img)
+    }
+
     // make the GPU buffers: the arena image and the intermittent blur buffer
     fn make_storage(
         device: Arc<Device>,
@@ -439,15 +491,42 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     }
 
     fn make_cells_desc_set(
+        device: Arc<Device>,
+        camera_image: Arc<StorageImage>,
         arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         desc_set_layout: Arc<DescriptorSetLayout>,
     ) -> Arc<PersistentDescriptorSet> {
+        let ivci = ImageViewCreateInfo {
+            format: Some(ImageFormat::B8G8R8A8_UNORM),
+            subresource_range: ImageSubresourceRange {
+                aspects: ImageAspects {
+                    color: true,
+                    ..ImageAspects::empty()
+                },
+                mip_levels: 0..1,
+                array_layers: 0..1,
+            },
+            ..Default::default()
+        };
         let desc_set = PersistentDescriptorSet::new(
             desc_set_layout,
             [
                 WriteDescriptorSet::buffer(0, arena_buffer.clone()),
                 WriteDescriptorSet::buffer(1, xblur_buffer.clone()),
+                WriteDescriptorSet::image_view_sampler(
+                    2,
+                    ImageView::new(camera_image, ivci).expect(
+                        "could not create
+                        an image view for the camera image!",
+                    ),
+                    Sampler::new(device, SamplerCreateInfo::simple_repeat_linear_no_mipmap())
+                        .expect(
+                            "could
+                        not create a simple repeating linear sampler for an
+                        image on the chosen GPU!",
+                        ),
+                ),
             ],
         )
         .expect("could not create persistent descriptor set for arena image");
@@ -531,6 +610,8 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             dims,
         );
         self.cells_desc_set = Self::make_cells_desc_set(
+            self.device.clone(),
+            self.camera_image.clone(),
             self.arena_buffer.clone(),
             self.xblur_buffer.clone(),
             self.cells.desc_set_layout.clone(),

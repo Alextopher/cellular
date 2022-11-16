@@ -6,6 +6,7 @@ extern crate winit;
 mod gpu_gore;
 
 use gpu_gore::VulkanData;
+use nokhwa::Camera;
 use std::sync::Arc;
 use vulkano::instance::Instance;
 use vulkano::swapchain::Surface;
@@ -23,6 +24,7 @@ struct VulkanWindow {
     sfc: Arc<Surface<Window>>,
     el: EventLoop<()>,
     vk: VulkanData<Window>,
+    cam: Camera,
 }
 
 impl VulkanWindow {
@@ -40,12 +42,12 @@ impl VulkanWindow {
         (sfc, el)
     }
 
-    fn init() -> Self {
+    fn init(mut cam: Camera) -> Self {
         let inst = VulkanData::<()>::init_vk_instance();
         let (sfc, el) = Self::init_winit(&inst);
-        let mut vk = VulkanData::init(inst, sfc.clone());
+        let mut vk = VulkanData::init(inst, sfc.clone(), &mut cam);
         vk.randomize_buffer(DEFAULT_DIMS);
-        Self { sfc, el, vk }
+        Self { sfc, el, vk, cam }
     }
 
     fn do_loop(self) {
@@ -154,6 +156,11 @@ fn main() {
     //        .collect::<Vec<_>>()
     //);
 
-    let vw = VulkanWindow::init();
+    // TODO
+    //nokhwa::nokhwa_initialize(something);
+    let mut cam = nokhwa::Camera::new(0, None).expect("could not initialize camera!");
+    cam.open_stream().expect("could not open camera stream");
+    let frame = cam.frame().expect("could not get a camera frame");
+    let vw = VulkanWindow::init(cam);
     vw.do_loop();
 }

@@ -15,6 +15,8 @@ layout(set = 0, binding = 1) buffer ly_xblur {
   vec4 xblur[];
 };
 
+layout(set = 0, binding = 2) uniform sampler2D camera_image;
+
 #include "kernel.glsl"
 
 vec4 blurred_sample(ivec2 coords, int offset) {
@@ -62,12 +64,18 @@ void main() {
   vec4 n = blurred_sample(coords, 2 * offset);
   vec4 self = arena[offset];
   float step = 0.02;
+  float blend_factor = 0.95;
   vec4 two_sigma = 2.0 * vec4(0.05, 0.02, 0.01, 1.0);
   vec4 mu = vec4(0.2, 0.3, 0.4, 0.0);
   vec4 diff = n - mu;
   vec4 factor = 2.0 * exp(- diff * diff / two_sigma) - 1.0;
   factor = cross_diff * factor;
-  vec4 result = clamp(self + factor * step, 0.0, 1.0);
+
+  // scale coordinates to [0, 1] for sampler
+  vec2 sampler_coords = vec2(coords) / vec2(constants.width, constants.height);
+  vec4 camera_value = texture(camera_image, sampler_coords);
+
+  vec4 result = clamp(blend_factor * (self + factor * step) + (1.0 - blend_factor) * camera_value, 0.0, 1.0);
   arena[offset] = result;
 }
 
