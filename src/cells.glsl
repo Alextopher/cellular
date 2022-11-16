@@ -46,8 +46,8 @@ vec4 blurred_sample(ivec2 coords, int offset) {
 }
 
 const float a = 0.8;
-const float b = 0.5;
-const float c = -0.5;
+const float b = 0.8;
+const float c = -0.8;
 const mat4 cross_diff = mat4(
       a,    c,    b,    0,
       b,    a,    c,    0,
@@ -63,19 +63,34 @@ void main() {
   int offset = coords.y * constants.width + coords.x;
   vec4 n = blurred_sample(coords, 2 * offset);
   vec4 self = arena[offset];
-  float step = 0.02;
-  float blend_factor = 0.95;
+
+  // scale coordinates to [0, 1] for sampler
+  vec2 sampler_coords = vec2(coords) / vec2(constants.width, constants.height);
+  vec4 camera_value = texture(camera_image, sampler_coords);
+
+  float step = 0.10;
+  float blend_factor = 0.05;
+  float fade_factor = 0.05;
+
   vec4 two_sigma = 2.0 * vec4(0.05, 0.02, 0.01, 1.0);
   vec4 mu = vec4(0.2, 0.3, 0.4, 0.0);
   vec4 diff = n - mu;
   vec4 factor = 2.0 * exp(- diff * diff / two_sigma) - 1.0;
   factor = cross_diff * factor;
 
-  // scale coordinates to [0, 1] for sampler
-  vec2 sampler_coords = vec2(coords) / vec2(constants.width, constants.height);
-  vec4 camera_value = texture(camera_image, sampler_coords);
+  vec4 cell_diff = factor * step;
+  vec4 cam_diff = (camera_value - step) * blend_factor;
+  float cell_len = length(cell_diff);
+  float cam_len = length(cam_diff);
+//  if (cell_len > 1.0 * cam_len) {
+//      cam_diff *= cell_len / cam_len * 1.0;
+//  }
+//  if (cam_len > 1.0 * cell_len) {
+//      cell_diff *= cam_len / cell_len * 1.0;
+//  }
+  vec4 total_diff = cell_diff + cam_diff - fade_factor * self;
 
-  vec4 result = clamp(blend_factor * (self + factor * step) + (1.0 - blend_factor) * camera_value, 0.0, 1.0);
+  vec4 result = clamp(self + total_diff, 0.0, 1.0);
   arena[offset] = result;
 }
 

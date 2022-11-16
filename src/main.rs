@@ -54,6 +54,7 @@ impl VulkanWindow {
         let el = self.el;
         let sfc = self.sfc;
         let mut vk = self.vk;
+        let mut cam = self.cam;
         let begin_time = std::time::Instant::now();
         let mut last_time = begin_time;
         let mut frame_was_last_time = true;
@@ -135,9 +136,10 @@ impl VulkanWindow {
                     //                    let warp = |x| 350.0 * (0.7 - f32::exp(1.0 * f32::sin(x)));
                     //                    let wide = warp(phase);
                     //                    let narrow = warp(phase - std::f32::consts::FRAC_PI_2);
-                    if elapsed > last_report_elapsed + 2.0 {
+                    if elapsed > last_report_elapsed + 0.1 {
                         println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}, frames since reset: {step_counter}");
                         last_report_elapsed = elapsed;
+                        vk.capture_frame(&mut cam);
                     }
                     vk.do_frame(&sfc, dims);
                 }
@@ -160,7 +162,7 @@ fn main() {
     //nokhwa::nokhwa_initialize(something);
     let mut cam = nokhwa::Camera::new(0, None).expect("could not initialize camera!");
     cam.open_stream().expect("could not open camera stream");
-    let frame = cam.frame().expect("could not get a camera frame");
+//    let frame = cam.frame().expect("could not get a camera frame");
     let vw = VulkanWindow::init(cam);
     vw.do_loop();
 }

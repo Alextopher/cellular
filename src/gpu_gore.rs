@@ -21,6 +21,7 @@ mod blit_shader {
     }
 }
 
+use image::buffer::ConvertBuffer;
 use super::DEFAULT_DIMS;
 use nokhwa::Camera;
 use rand::Rng;
@@ -28,7 +29,7 @@ use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 use vulkano::buffer::{cpu_access::CpuAccessibleBuffer, BufferUsage, DeviceLocalBuffer};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfoTyped};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, CopyBufferInfoTyped, CopyBufferToImageInfo};
 use vulkano::descriptor_set::{
     layout::DescriptorSetLayout, persistent::PersistentDescriptorSet, WriteDescriptorSet,
 };
@@ -441,7 +442,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             device.clone(),
             usage,
             false,
-            itertools::repeat_n(0u8, (4 * width_x * height_y) as usize),
+            itertools::repeat_n(0u8, cam.min_buffer_size(true)),
         )
         .expect("could not create camera buffer!");
         let dims = ImageDimensions::Dim2d {
@@ -458,7 +459,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         let img = StorageImage::with_usage(
             device,
             dims,
-            ImageFormat::B8G8R8A8_UNORM,
+            ImageFormat::R8G8B8A8_UNORM,
             usage,
             ImageCreateFlags::empty(),
             [qf],
@@ -498,7 +499,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         desc_set_layout: Arc<DescriptorSetLayout>,
     ) -> Arc<PersistentDescriptorSet> {
         let ivci = ImageViewCreateInfo {
-            format: Some(ImageFormat::B8G8R8A8_UNORM),
+            format: Some(ImageFormat::R8G8B8A8_UNORM),
             subresource_range: ImageSubresourceRange {
                 aspects: ImageAspects {
                     color: true,
@@ -670,6 +671,37 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .expect("could not flush future!")
             .wait(None)
             .expect("could not wait on future!");
+    }
+
+    pub fn capture_frame(&mut self, cam: &mut Camera) {
+        // i do not know why, but this fails.
+        //cam.frame_to_buffer(&mut *self.camera_buffer.write().expect("could not
+        //        get write lock on camera buffer"), true).expect("could not
+        //        capture a camera frame");
+        // therefore, we shall do this instead
+        let rgba: image::RgbaImage = cam.frame().expect("could not capture camera frame!").convert();
+        self.camera_buffer.write().expect("could note get write lock on camera buffer").copy_from_slice(rgba.as_raw());
+        let mut builder = AutoCommandBufferBuilder::primary(
+            self.device.clone(),
+            self.compute_queue.queue_family_index(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .expect("could not make command buffer builder!");
+        builder
+        .copy_buffer_to_image(
+            CopyBufferToImageInfo::buffer_image(
+                self.camera_buffer.clone(),
+                self.camera_image.clone(),
+            )
+        ).expect("could not copy camera buffer to camera image buffer!");
+        let cmd_buf = builder.build().expect("could not build the camera image copy command buffer!");
+        self.frame_future.take().unwrap_or_else(|| vulkano::sync::now(self.device.clone()).boxed())
+        .then_execute(self.compute_queue.clone(), cmd_buf)
+        .expect("could not execute command queue!")
+        .then_signal_fence_and_flush()
+        .expect("could not flush future!")
+        .wait(None)
+        .expect("could not wait on future!");
     }
 
     pub fn do_frame(&mut self, sfc: &Arc<Surface<W>>, dims: [u32; 2]) {

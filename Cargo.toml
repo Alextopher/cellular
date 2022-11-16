@@ -17,6 +17,8 @@ num = "0.4"
 bytemuck = "^1.7"
 colored = "2.0"
 itertools = "0.10"
+# it may be necessary to adjust this with nokhwa version
+image = "0.23"
 
 [dependencies.nokhwa]
 version = "0.9"
