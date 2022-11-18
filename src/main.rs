@@ -52,7 +52,12 @@ impl VulkanWindow {
         let (sfc, el) = Self::init_winit(&inst);
         let mut vk = VulkanData::init(inst, sfc.clone(), res);
         vk.randomize_buffer(DEFAULT_DIMS);
-        Self { sfc, el, vk, control_state }
+        Self {
+            sfc,
+            el,
+            vk,
+            control_state,
+        }
     }
 
     fn do_loop(self, get_frame: impl Fn() -> Option<RgbaImage> + 'static) {
@@ -180,14 +185,17 @@ fn main() {
     cam.open_stream().expect("could not open camera stream");
     let res = cam.resolution();
     println!("camera frame rate: {}", cam.frame_rate());
-    let _ = std::thread::spawn(move || {
-        loop {
-          tx.send(cam.frame().expect("could not capture camera frame!").convert());
-          println!("captured frame");
-        }
+    let _ = std::thread::spawn(move || loop {
+        tx.send(
+            cam.frame()
+                .expect("could not capture camera frame!")
+                .convert(),
+        );
+        println!("captured frame");
     });
     let control_state = Arc::new(parameters::new_control_state());
-    let conn = parameters::init_control(control_state.clone()).expect("could not initialize controller!");
+    let conn =
+        parameters::init_control(control_state.clone()).expect("could not initialize controller!");
     let vw = VulkanWindow::init(control_state, res);
     vw.do_loop(move || -> Option<image::RgbaImage> {
         match rx.try_recv() {
