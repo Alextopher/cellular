@@ -57,6 +57,12 @@ impl Parameters {
     if let Some(x) = read_control_state(cs, 7).map(|x| f(x) * 0.5) {
         self.step_factor = x;
     }
+    if let Some(x) = read_control_state(cs, 16).map(|x| (x as f32 / 127.0) * 60.0) {
+        self.big_stdev = x;
+    }
+    if let Some(x) = read_control_state(cs, 17).map(|x| ((x as f32 + 0.5) / 127.0) * 60.0) {
+        self.small_stdev = x;
+    }
   }
 }
 

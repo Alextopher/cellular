@@ -94,6 +94,11 @@ impl VulkanWindow {
                         (Some(VirtualKeyCode::Q), _) => {
                             *elcf = ControlFlow::Exit;
                         }
+                        (Some(VirtualKeyCode::Space), _) => {
+                            let mut wl = vk.params_write_lock();
+                            println!("parameter state: {:?}", *wl);
+                            std::mem::drop(wl);
+                        }
                         _ => (),
                     }
                 }
@@ -147,7 +152,6 @@ impl VulkanWindow {
                     }
                     let mut wl = vk.params_write_lock();
                     wl.update_from_controller(&*self.control_state);
-                    println!("{:?}", *wl);
                     std::mem::drop(wl);
                     vk.do_frame(&sfc, dims);
                 }
