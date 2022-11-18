@@ -4,8 +4,11 @@ extern crate vulkano_win;
 extern crate winit;
 
 mod gpu_gore;
+mod parameters;
 
 use gpu_gore::VulkanData;
+use parameters::{ControlState, Parameters};
+
 use nokhwa::Camera;
 use std::sync::Arc;
 use vulkano::instance::Instance;
@@ -42,7 +45,7 @@ impl VulkanWindow {
         (sfc, el)
     }
 
-    fn init(mut cam: Camera) -> Self {
+    fn init(mut cam: Camera, control_state: Arc<ControlState>) -> Self {
         let inst = VulkanData::<()>::init_vk_instance();
         let (sfc, el) = Self::init_winit(&inst);
         let mut vk = VulkanData::init(inst, sfc.clone(), &mut cam);
@@ -162,7 +165,8 @@ fn main() {
     //nokhwa::nokhwa_initialize(something);
     let mut cam = nokhwa::Camera::new(0, None).expect("could not initialize camera!");
     cam.open_stream().expect("could not open camera stream");
-    //    let frame = cam.frame().expect("could not get a camera frame");
+    let control_state = Arc::new(parameters::new_control_state());
+    let _ = parameters::init_control(control_state.clone());
     let vw = VulkanWindow::init(cam);
     vw.do_loop();
 }

@@ -21,7 +21,9 @@ mod blit_shader {
     }
 }
 
+use parameters::Parameters;
 use super::DEFAULT_DIMS;
+
 use image::buffer::ConvertBuffer;
 use nokhwa::Camera;
 use rand::Rng;
@@ -73,6 +75,7 @@ pub struct VulkanData<W> {
     blit: ShaderModData,
     camera_buffer: Arc<CpuAccessibleBuffer<[u8]>>,
     camera_image: Arc<StorageImage>,
+    parameters_buffer: Arc<CpuAccessibleBuffer<Parameters>>,
     arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
     xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
     swapchain: Arc<Swapchain<W>>,
