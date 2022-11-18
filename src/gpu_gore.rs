@@ -234,6 +234,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             cells.desc_set_layout.clone(),
         );
         let xblur_desc_set = Self::make_xblur_desc_set(
+            parameters_buffer.clone(),
             arena_buffer.clone(),
             xblur_buffer.clone(),
             xblur.desc_set_layout.clone(),
@@ -487,9 +488,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             // TODO: move this initialization elsewhere
             Parameters {
                 mat_parts: [0.8, 0.8, -0.8],
-                blend_factor: 0.05,
+                step_factor: 0.1,
                 fade_factor: 0.05,
                 stdevs: [0.05, 0.02, 0.01],
+                small_stdev: 15.0,
+                big_stdev: 30.0,
             }
         )
         .expect("could not create camera buffer!");
@@ -565,6 +568,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     }
 
     fn make_xblur_desc_set(
+        parameters_buffer: Arc<CpuAccessibleBuffer<Parameters>>,
         arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         desc_set_layout: Arc<DescriptorSetLayout>,
@@ -572,8 +576,9 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         let desc_set = PersistentDescriptorSet::new(
             desc_set_layout,
             [
-                WriteDescriptorSet::buffer(0, arena_buffer.clone()),
-                WriteDescriptorSet::buffer(1, xblur_buffer.clone()),
+                WriteDescriptorSet::buffer(0, parameters_buffer.clone()),
+                WriteDescriptorSet::buffer(1, arena_buffer.clone()),
+                WriteDescriptorSet::buffer(2, xblur_buffer.clone()),
             ],
         )
         .expect("could not create persistent descriptor set for arena image");
@@ -649,6 +654,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             self.cells.desc_set_layout.clone(),
         );
         self.xblur_desc_set = Self::make_xblur_desc_set(
+            self.parameters_buffer.clone(),
             self.arena_buffer.clone(),
             self.xblur_buffer.clone(),
             self.xblur.desc_set_layout.clone(),

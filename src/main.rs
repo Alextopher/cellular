@@ -140,7 +140,7 @@ impl VulkanWindow {
                     //                    let warp = |x| 350.0 * (0.7 - f32::exp(1.0 * f32::sin(x)));
                     //                    let wide = warp(phase);
                     //                    let narrow = warp(phase - std::f32::consts::FRAC_PI_2);
-                    if elapsed > last_report_elapsed + 0.1 {
+                    if elapsed > last_report_elapsed + 0.03 {
                         println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}, frames since reset: {step_counter}");
                         last_report_elapsed = elapsed;
                         vk.capture_frame(&mut cam);

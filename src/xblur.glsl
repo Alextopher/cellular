@@ -2,11 +2,24 @@
 
 layout (local_size_x = 32, local_size_y = 32) in;
 
-layout(set = 0, binding = 0) buffer ly_arena {
+layout(set = 0, binding = 0) buffer parameters {
+  float mat_a;
+  float mat_b;
+  float mat_c;
+  float step_factor;
+  float fade_factor;
+  float stdevs_r;
+  float stdevs_g;
+  float stdevs_b;
+  float small_stdev;
+  float big_stdev;
+} params;
+
+layout(set = 0, binding = 1) buffer ly_arena {
   vec4 arena[];
 };
 
-layout(set = 0, binding = 1) buffer ly_xblur {
+layout(set = 0, binding = 2) buffer ly_xblur {
   vec4 xblur[];
 };
 
@@ -29,8 +42,8 @@ void main() {
   int lowx = coords.x, highx = coords.x;
   int lowoff = offset, highoff = offset;
   for (int i = 0; i < num_steps; i++) {
-    big_output += big_weights[i] * (arena[lowoff] + arena[highoff]);
-    small_output += small_weights[i] * (arena[lowoff] + arena[highoff]);
+    big_output += kernel_weight(params.big_stdev, i) * (arena[lowoff] + arena[highoff]);
+    small_output += kernel_weight(params.small_stdev, i) * (arena[lowoff] + arena[highoff]);
     lowx -= 1;
     lowoff -= 1;
     highx += 1;

@@ -11,11 +11,13 @@ layout(set = 0, binding = 0) buffer parameters {
   float mat_a;
   float mat_b;
   float mat_c;
-  float blend_factor;
+  float step_factor;
   float fade_factor;
   float stdevs_r;
   float stdevs_g;
   float stdevs_b;
+  float small_stdev;
+  float big_stdev;
 } params;
 
 layout(set = 0, binding = 1) buffer ly_arena {
@@ -38,8 +40,8 @@ vec4 blurred_sample(ivec2 coords, int offset) {
   int lowy = coords.y, highy = coords.y;
   int lowoff = offset, highoff = offset;
   for (int i = 0; i < num_steps; i++) {
-    big_output += big_weights[i] * (xblur[lowoff] + xblur[highoff]);
-    small_output += small_weights[i] * (xblur[lowoff + 1] + xblur[highoff + 1]);
+    big_output += kernel_weight(params.big_stdev, i) * (xblur[lowoff] + xblur[highoff]);
+    small_output += kernel_weight(params.small_stdev, i) * (xblur[lowoff + 1] + xblur[highoff + 1]);
     lowoff -= column_stride;
     lowy -= 1;
     highoff += column_stride;
@@ -53,7 +55,8 @@ vec4 blurred_sample(ivec2 coords, int offset) {
       lowoff += loop_stride;
     }
   }
-  return big_output - small_output;
+  float integral = big_stdev * big_stdev - small_stdev * small_stdev;
+  return (big_output - small_output) / integral;
 }
 
 void main() {
@@ -79,27 +82,17 @@ void main() {
   vec2 sampler_coords = vec2(coords) / vec2(constants.width, constants.height);
   vec4 camera_value = texture(camera_image, sampler_coords);
 
-  float step = 0.10;
-  float blend_factor = 0.05;
-  float fade_factor = 0.05;
+  float step = params.step_factor;
+  float fade_factor = params.fade_factor;
 
-  vec4 two_sigma = 2.0 * vec4(0.05, 0.02, 0.01, 1.0);
+  vec4 two_sigma = 2.0 * vec4(params.stdevs_r, params.stdevs_g, params.stdevs_b, 1.0);
   vec4 mu = camera_value;
   vec4 diff = n - mu;
   vec4 factor = 2.0 * exp(- diff * diff / two_sigma) - 1.0;
   factor = cross_diff * factor;
 
   vec4 cell_diff = factor * step;
-//  vec4 cam_diff = (camera_value - step) * blend_factor;
-//  float cell_len = length(cell_diff);
-//  float cam_len = length(cam_diff);
-//  if (cell_len > 1.0 * cam_len) {
-//      cam_diff *= cell_len / cam_len * 1.0;
-//  }
-//  if (cam_len > 1.0 * cell_len) {
-//      cell_diff *= cam_len / cell_len * 1.0;
-//  }
-  vec4 total_diff = cell_diff /*+ cam_diff*/ - fade_factor * self;
+  vec4 total_diff = cell_diff - fade_factor * self;
 
   vec4 result = clamp(self + total_diff, 0.0, 1.0);
   arena[offset] = result;
