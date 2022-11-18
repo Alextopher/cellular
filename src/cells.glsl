@@ -7,15 +7,26 @@ layout(push_constant) uniform PushConstants {
   int width;
 } constants;
 
-layout(set = 0, binding = 0) buffer ly_arena {
+layout(set = 0, binding = 0) buffer parameters {
+  float mat_a;
+  float mat_b;
+  float mat_c;
+  float blend_factor;
+  float fade_factor;
+  float stdevs_r;
+  float stdevs_g;
+  float stdevs_b;
+} params;
+
+layout(set = 0, binding = 1) buffer ly_arena {
   vec4 arena[];
 };
 
-layout(set = 0, binding = 1) buffer ly_xblur {
+layout(set = 0, binding = 2) buffer ly_xblur {
   vec4 xblur[];
 };
 
-layout(set = 0, binding = 2) uniform sampler2D camera_image;
+layout(set = 0, binding = 3) uniform sampler2D camera_image;
 
 #include "kernel.glsl"
 
@@ -45,17 +56,17 @@ vec4 blurred_sample(ivec2 coords, int offset) {
   return big_output - small_output;
 }
 
-const float a = 0.8;
-const float b = 0.8;
-const float c = -0.8;
-const mat4 cross_diff = mat4(
+void main() {
+  const float a = params.mat_a;
+  const float b = params.mat_b;
+  const float c = params.mat_c;
+
+  const mat4 cross_diff = mat4(
       a,    c,    b,    0,
       b,    a,    c,    0,
       c,    b,    a,    0,
       0,    0,    0,    0 
-    );
-
-void main() {
+      );
   ivec2 coords = ivec2(gl_GlobalInvocationID.xy);
   if (coords.x >= constants.width || coords.y >= constants.height) {
     return;

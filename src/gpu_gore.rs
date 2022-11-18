@@ -21,7 +21,7 @@ mod blit_shader {
     }
 }
 
-use parameters::Parameters;
+use crate::parameters::Parameters;
 use super::DEFAULT_DIMS;
 
 use image::buffer::ConvertBuffer;
@@ -58,6 +58,9 @@ use vulkano::swapchain::{
 };
 use vulkano::sync::{GpuFuture, Sharing};
 use vulkano::DeviceSize;
+
+pub type WriteLock<'a, T> = vulkano::buffer::cpu_access::WriteLock<'a, T, vulkano::memory::pool::PotentialDedicatedAllocation<vulkano::memory::pool::StandardMemoryPoolAlloc>>;
+
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -215,8 +218,8 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             DEFAULT_DIMS,
         );
         let image_format = swapchain.image_format();
-        let (camera_buffer, camera_image) =
-            Self::make_camera_storage(device.clone(), compute_queue.queue_family_index(), cam);
+        let (camera_buffer, camera_image, parameters_buffer) =
+            Self::make_static_storage(device.clone(), compute_queue.queue_family_index(), cam);
         let (arena_buffer, xblur_buffer) = Self::make_storage(
             device.clone(),
             compute_queue.queue_family_index(),
@@ -225,6 +228,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         let cells_desc_set = Self::make_cells_desc_set(
             device.clone(),
             camera_image.clone(),
+            parameters_buffer.clone(),
             arena_buffer.clone(),
             xblur_buffer.clone(),
             cells.desc_set_layout.clone(),
@@ -255,6 +259,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             blit,
             camera_buffer,
             camera_image,
+            parameters_buffer,
             arena_buffer,
             xblur_buffer,
             swapchain,
@@ -432,12 +437,13 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         (swapchain, swapchain_images)
     }
 
-    // make the camera-related buffer and image
-    fn make_camera_storage(
+    // make the buffers and images which do not need to be remade when the screen is resized
+    fn make_static_storage(
         device: Arc<Device>,
         qf: u32,
         cam: &mut Camera,
-    ) -> (Arc<CpuAccessibleBuffer<[u8]>>, Arc<StorageImage>) {
+    ) -> (Arc<CpuAccessibleBuffer<[u8]>>, Arc<StorageImage>,
+    Arc<CpuAccessibleBuffer<Parameters>>) {
         let nokhwa::Resolution { width_x, height_y } = cam.resolution();
         let usage = BufferUsage {
             transfer_src: true,
@@ -462,7 +468,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             ..ImageUsage::empty()
         };
         let img = StorageImage::with_usage(
-            device,
+            device.clone(),
             dims,
             ImageFormat::R8G8B8A8_UNORM,
             usage,
@@ -470,7 +476,24 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             [qf],
         )
         .expect("could not create camera image buffer");
-        (buf, img)
+        let usage = BufferUsage {
+            storage_buffer: true,
+            ..BufferUsage::empty()
+        };
+        let params_buf = CpuAccessibleBuffer::from_data(
+            device,
+            usage,
+            false,
+            // TODO: move this initialization elsewhere
+            Parameters {
+                mat_parts: [0.8, 0.8, -0.8],
+                blend_factor: 0.05,
+                fade_factor: 0.05,
+                stdevs: [0.05, 0.02, 0.01],
+            }
+        )
+        .expect("could not create camera buffer!");
+        (buf, img, params_buf)
     }
 
     // make the GPU buffers: the arena image and the intermittent blur buffer
@@ -499,6 +522,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     fn make_cells_desc_set(
         device: Arc<Device>,
         camera_image: Arc<StorageImage>,
+        parameters_buffer: Arc<CpuAccessibleBuffer<Parameters>>,
         arena_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         xblur_buffer: Arc<DeviceLocalBuffer<[f32]>>,
         desc_set_layout: Arc<DescriptorSetLayout>,
@@ -518,10 +542,11 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         let desc_set = PersistentDescriptorSet::new(
             desc_set_layout,
             [
-                WriteDescriptorSet::buffer(0, arena_buffer.clone()),
-                WriteDescriptorSet::buffer(1, xblur_buffer.clone()),
+                WriteDescriptorSet::buffer(0, parameters_buffer.clone()),
+                WriteDescriptorSet::buffer(1, arena_buffer.clone()),
+                WriteDescriptorSet::buffer(2, xblur_buffer.clone()),
                 WriteDescriptorSet::image_view_sampler(
-                    2,
+                    3,
                     ImageView::new(camera_image, ivci).expect(
                         "could not create
                         an image view for the camera image!",
@@ -618,6 +643,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         self.cells_desc_set = Self::make_cells_desc_set(
             self.device.clone(),
             self.camera_image.clone(),
+            self.parameters_buffer.clone(),
             self.arena_buffer.clone(),
             self.xblur_buffer.clone(),
             self.cells.desc_set_layout.clone(),
@@ -716,6 +742,14 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .expect("could not flush future!")
             .wait(None)
             .expect("could not wait on future!");
+    }
+
+    pub fn params_write_lock(&mut self) -> WriteLock<'_, Parameters> {
+        if let Some(mut last_frame) = self.frame_future.take() {
+            last_frame.cleanup_finished();
+        }
+        self.parameters_buffer.write().expect("could not get write lock on
+            parameters buffer")
     }
 
     pub fn do_frame(&mut self, sfc: &Arc<Surface<W>>, dims: [u32; 2]) {

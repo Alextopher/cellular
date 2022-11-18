@@ -4,13 +4,14 @@ use midir::{MidiInput, MidiInputConnection};
 
 /// the parameters to be input to the shader
 #[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Parameters {
   /// the three parts of the cross-color matrix: forward, self, and backward
-  mat_parts: (f32, f32, f32),
-  blend_factor: f32,
-  fade_factor: f32,
+  pub mat_parts: [f32; 3],
+  pub blend_factor: f32,
+  pub fade_factor: f32,
   /// the standard deviations of the cellular automata response curves
-  stdevs: (f32, f32, f32),
+  pub stdevs: [f32; 3],
 }
 
 
@@ -22,18 +23,22 @@ pub fn new_control_state() -> ControlState {
   unsafe { std::mem::transmute::<[u8; 32], [AtomicU8; 32]>([0u8; 32]) }
 }
 
+pub fn read_control_state(cs: &ControlState, i: usize) -> Option<u8>{
+    let x = cs[i].swap(255, Ordering::Relaxed);
+    if x == 255 {
+        None
+    } else {
+        Some(x)
+    }
+}
+
 impl Parameters {
-  fn update_from_controller(&mut self, cs: &ControlState) {
-    let r = |i: usize| cs[i].load(Ordering::Relaxed);
-    let f = |x: u8| if x == 255 { None } else { Some(x as f32 / 127.0) };
-    if let Some(x) = f(r(0)) {
-      self.mat_parts.0 = x;
-    }
-    if let Some(x) = f(r(1)) {
-      self.mat_parts.1 = x;
-    }
-    if let Some(x) = f(r(2)) {
-      self.mat_parts.2 = x;
+  pub fn update_from_controller(&mut self, cs: &ControlState) {
+    let f = |x: u8| 2.0 * (x as f32 / 127.0) - 1.0;
+    for i in 0..3 {
+        if let Some(x) = read_control_state(cs, i).map(|x| f(x)) {
+            self.mat_parts[i] = x;
+        }
     }
   }
 }
@@ -57,7 +62,7 @@ pub fn init_control<'a>(control: std::sync::Arc<ControlState>) -> Result<MidiInp
   }
 
   let conn = midi_input.connect(&port, "midic_test", |_, bytes, cs| {
-    if bytes.len() != 3 || bytes[0] != 0xb0 || bytes[2] >= 32 {
+    if bytes.len() != 3 || bytes[0] != 0xb0 || bytes[1] >= 32 {
       return;
     }
     cs[bytes[1] as usize].store(bytes[2], Ordering::Relaxed);

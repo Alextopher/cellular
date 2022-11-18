@@ -28,6 +28,7 @@ struct VulkanWindow {
     el: EventLoop<()>,
     vk: VulkanData<Window>,
     cam: Camera,
+    control_state: Arc<ControlState>,
 }
 
 impl VulkanWindow {
@@ -50,7 +51,7 @@ impl VulkanWindow {
         let (sfc, el) = Self::init_winit(&inst);
         let mut vk = VulkanData::init(inst, sfc.clone(), &mut cam);
         vk.randomize_buffer(DEFAULT_DIMS);
-        Self { sfc, el, vk, cam }
+        Self { sfc, el, vk, cam, control_state }
     }
 
     fn do_loop(self) {
@@ -144,6 +145,10 @@ impl VulkanWindow {
                         last_report_elapsed = elapsed;
                         vk.capture_frame(&mut cam);
                     }
+                    let mut wl = vk.params_write_lock();
+                    wl.update_from_controller(&*self.control_state);
+                    println!("{:?}", *wl);
+                    std::mem::drop(wl);
                     vk.do_frame(&sfc, dims);
                 }
                 _ => {}
@@ -166,7 +171,8 @@ fn main() {
     let mut cam = nokhwa::Camera::new(0, None).expect("could not initialize camera!");
     cam.open_stream().expect("could not open camera stream");
     let control_state = Arc::new(parameters::new_control_state());
-    let _ = parameters::init_control(control_state.clone());
-    let vw = VulkanWindow::init(cam);
+    let conn = parameters::init_control(control_state.clone()).expect("could not initialize controller!");
+    let vw = VulkanWindow::init(cam, control_state);
     vw.do_loop();
+    std::mem::drop(conn);
 }
