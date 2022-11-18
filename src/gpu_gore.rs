@@ -24,7 +24,6 @@ mod blit_shader {
 use crate::parameters::Parameters;
 use super::DEFAULT_DIMS;
 
-use image::buffer::ConvertBuffer;
 use nokhwa::Camera;
 use rand::Rng;
 use std::collections::hash_set::HashSet;
@@ -134,7 +133,7 @@ const VALIDATION_LAYERS: &[&str] = &[
 const USE_VALIDATION_LAYERS: bool = true;
 
 impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
-    pub fn init(inst: Arc<Instance>, sfc: Arc<Surface<W>>, cam: &mut Camera) -> Self {
+    pub fn init(inst: Arc<Instance>, sfc: Arc<Surface<W>>, cam_res: nokhwa::Resolution) -> Self {
         use std::io::Write;
         let device_idxs = inst
             .enumerate_physical_devices()
@@ -219,7 +218,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         );
         let image_format = swapchain.image_format();
         let (camera_buffer, camera_image, parameters_buffer) =
-            Self::make_static_storage(device.clone(), compute_queue.queue_family_index(), cam);
+            Self::make_static_storage(device.clone(), compute_queue.queue_family_index(), cam_res);
         let (arena_buffer, xblur_buffer) = Self::make_storage(
             device.clone(),
             compute_queue.queue_family_index(),
@@ -442,10 +441,9 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     fn make_static_storage(
         device: Arc<Device>,
         qf: u32,
-        cam: &mut Camera,
+        nokhwa::Resolution { width_x, height_y } : nokhwa::Resolution,
     ) -> (Arc<CpuAccessibleBuffer<[u8]>>, Arc<StorageImage>,
     Arc<CpuAccessibleBuffer<Parameters>>) {
-        let nokhwa::Resolution { width_x, height_y } = cam.resolution();
         let usage = BufferUsage {
             transfer_src: true,
             ..BufferUsage::empty()
@@ -454,7 +452,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             device.clone(),
             usage,
             false,
-            itertools::repeat_n(0u8, cam.min_buffer_size(true)),
+            itertools::repeat_n(0u8, (width_x * height_y * 4) as usize,)
         )
         .expect("could not create camera buffer!");
         let dims = ImageDimensions::Dim2d {
@@ -710,16 +708,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             .expect("could not wait on future!");
     }
 
-    pub fn capture_frame(&mut self, cam: &mut Camera) {
-        // i do not know why, but this fails.
-        //cam.frame_to_buffer(&mut *self.camera_buffer.write().expect("could not
-        //        get write lock on camera buffer"), true).expect("could not
-        //        capture a camera frame");
-        // therefore, we shall do this instead
-        let rgba: image::RgbaImage = cam
-            .frame()
-            .expect("could not capture camera frame!")
-            .convert();
+    pub fn capture_frame(&mut self, rgba: image::RgbaImage) {
         self.camera_buffer
             .write()
             .expect("could note get write lock on camera buffer")

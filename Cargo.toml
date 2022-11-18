@@ -23,4 +23,4 @@ midir = "0.8"
 
 [dependencies.nokhwa]
 version = "0.9"
-features = ["input-v4l", "input-msmf"]
+features = ["input-v4l", "input-msmf", "output-threaded"]

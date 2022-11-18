@@ -9,6 +9,8 @@ mod parameters;
 use gpu_gore::VulkanData;
 use parameters::{ControlState, Parameters};
 
+use image::buffer::ConvertBuffer;
+use image::RgbaImage;
 use nokhwa::Camera;
 use std::sync::Arc;
 use vulkano::instance::Instance;
@@ -27,7 +29,6 @@ struct VulkanWindow {
     sfc: Arc<Surface<Window>>,
     el: EventLoop<()>,
     vk: VulkanData<Window>,
-    cam: Camera,
     control_state: Arc<ControlState>,
 }
 
@@ -46,19 +47,18 @@ impl VulkanWindow {
         (sfc, el)
     }
 
-    fn init(mut cam: Camera, control_state: Arc<ControlState>) -> Self {
+    fn init(control_state: Arc<ControlState>, res: nokhwa::Resolution) -> Self {
         let inst = VulkanData::<()>::init_vk_instance();
         let (sfc, el) = Self::init_winit(&inst);
-        let mut vk = VulkanData::init(inst, sfc.clone(), &mut cam);
+        let mut vk = VulkanData::init(inst, sfc.clone(), res);
         vk.randomize_buffer(DEFAULT_DIMS);
-        Self { sfc, el, vk, cam, control_state }
+        Self { sfc, el, vk, control_state }
     }
 
-    fn do_loop(self) {
+    fn do_loop(self, get_frame: impl Fn() -> Option<RgbaImage> + 'static) {
         let el = self.el;
         let sfc = self.sfc;
         let mut vk = self.vk;
-        let mut cam = self.cam;
         let begin_time = std::time::Instant::now();
         let mut last_time = begin_time;
         let mut frame_was_last_time = true;
@@ -145,10 +145,12 @@ impl VulkanWindow {
                     //                    let warp = |x| 350.0 * (0.7 - f32::exp(1.0 * f32::sin(x)));
                     //                    let wide = warp(phase);
                     //                    let narrow = warp(phase - std::f32::consts::FRAC_PI_2);
-                    if elapsed > last_report_elapsed + 0.03 {
+                    if elapsed > last_report_elapsed + 5.0 {
                         println!("redrawing; fr: {fr:10.5}, elapsed: {elapsed:10.5}, frames since reset: {step_counter}");
                         last_report_elapsed = elapsed;
-                        vk.capture_frame(&mut cam);
+                    }
+                    if let Some(frame) = get_frame() {
+                        vk.capture_frame(frame);
                     }
                     let mut wl = vk.params_write_lock();
                     wl.update_from_controller(&*self.control_state);
@@ -162,6 +164,7 @@ impl VulkanWindow {
 }
 
 fn main() {
+    use std::sync::mpsc::TryRecvError;
     //println!(
     //    "layers: {:?}",
     //    vulkano::instance::layers_list()
@@ -172,11 +175,26 @@ fn main() {
 
     // TODO
     //nokhwa::nokhwa_initialize(something);
+    let (tx, rx) = std::sync::mpsc::sync_channel(100);
     let mut cam = nokhwa::Camera::new(0, None).expect("could not initialize camera!");
     cam.open_stream().expect("could not open camera stream");
+    let res = cam.resolution();
+    println!("camera frame rate: {}", cam.frame_rate());
+    let _ = std::thread::spawn(move || {
+        loop {
+          tx.send(cam.frame().expect("could not capture camera frame!").convert());
+          println!("captured frame");
+        }
+    });
     let control_state = Arc::new(parameters::new_control_state());
     let conn = parameters::init_control(control_state.clone()).expect("could not initialize controller!");
-    let vw = VulkanWindow::init(cam, control_state);
-    vw.do_loop();
+    let vw = VulkanWindow::init(control_state, res);
+    vw.do_loop(move || -> Option<image::RgbaImage> {
+        match rx.try_recv() {
+            Ok(frame) => Some(frame),
+            Err(TryRecvError::Disconnected) => panic!("second thread terminated unexpectedly"),
+            Err(TryRecvError::Empty) => None,
+        }
+    });
     std::mem::drop(conn);
 }
