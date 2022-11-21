@@ -21,8 +21,8 @@ mod blit_shader {
     }
 }
 
-use crate::parameters::Parameters;
 use super::DEFAULT_DIMS;
+use crate::parameters::Parameters;
 
 use nokhwa::Camera;
 use rand::Rng;
@@ -58,8 +58,13 @@ use vulkano::swapchain::{
 use vulkano::sync::{GpuFuture, Sharing};
 use vulkano::DeviceSize;
 
-pub type WriteLock<'a, T> = vulkano::buffer::cpu_access::WriteLock<'a, T, vulkano::memory::pool::PotentialDedicatedAllocation<vulkano::memory::pool::StandardMemoryPoolAlloc>>;
-
+pub type WriteLock<'a, T> = vulkano::buffer::cpu_access::WriteLock<
+    'a,
+    T,
+    vulkano::memory::pool::PotentialDedicatedAllocation<
+        vulkano::memory::pool::StandardMemoryPoolAlloc,
+    >,
+>;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -441,9 +446,12 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     fn make_static_storage(
         device: Arc<Device>,
         qf: u32,
-        nokhwa::Resolution { width_x, height_y } : nokhwa::Resolution,
-    ) -> (Arc<CpuAccessibleBuffer<[u8]>>, Arc<StorageImage>,
-    Arc<CpuAccessibleBuffer<Parameters>>) {
+        nokhwa::Resolution { width_x, height_y }: nokhwa::Resolution,
+    ) -> (
+        Arc<CpuAccessibleBuffer<[u8]>>,
+        Arc<StorageImage>,
+        Arc<CpuAccessibleBuffer<Parameters>>,
+    ) {
         let usage = BufferUsage {
             transfer_src: true,
             ..BufferUsage::empty()
@@ -452,7 +460,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
             device.clone(),
             usage,
             false,
-            itertools::repeat_n(0u8, (width_x * height_y * 4) as usize,)
+            itertools::repeat_n(0u8, (width_x * height_y * 4) as usize),
         )
         .expect("could not create camera buffer!");
         let dims = ImageDimensions::Dim2d {
@@ -491,7 +499,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 stdevs: [0.05, 0.02, 0.01],
                 small_stdev: 15.0,
                 big_stdev: 30.0,
-            }
+            },
         )
         .expect("could not create camera buffer!");
         (buf, img, params_buf)
@@ -743,8 +751,10 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
         if let Some(mut last_frame) = self.frame_future.take() {
             last_frame.cleanup_finished();
         }
-        self.parameters_buffer.write().expect("could not get write lock on
-            parameters buffer")
+        self.parameters_buffer.write().expect(
+            "could not get write lock on
+            parameters buffer",
+        )
     }
 
     pub fn do_frame(&mut self, sfc: &Arc<Surface<W>>, dims: [u32; 2]) {

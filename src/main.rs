@@ -191,7 +191,7 @@ fn main() {
                 .expect("could not capture camera frame!")
                 .convert(),
         );
-        println!("captured frame");
+        //println!("captured frame");
     });
     let control_state = Arc::new(parameters::new_control_state());
     let conn =
