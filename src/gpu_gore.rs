@@ -24,7 +24,7 @@ mod blit_shader {
 use super::DEFAULT_DIMS;
 use crate::parameters::Parameters;
 
-use nokhwa::Camera;
+use nokhwa::{Camera, utils::Resolution as CamRes};
 use rand::Rng;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
@@ -138,7 +138,7 @@ const VALIDATION_LAYERS: &[&str] = &[
 const USE_VALIDATION_LAYERS: bool = true;
 
 impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
-    pub fn init(inst: Arc<Instance>, sfc: Arc<Surface<W>>, cam_res: nokhwa::Resolution) -> Self {
+    pub fn init(inst: Arc<Instance>, sfc: Arc<Surface<W>>, cam_res: CamRes) -> Self {
         use std::io::Write;
         let device_idxs = inst
             .enumerate_physical_devices()
@@ -446,7 +446,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
     fn make_static_storage(
         device: Arc<Device>,
         qf: u32,
-        nokhwa::Resolution { width_x, height_y }: nokhwa::Resolution,
+        CamRes { width_x, height_y }: CamRes,
     ) -> (
         Arc<CpuAccessibleBuffer<[u8]>>,
         Arc<StorageImage>,

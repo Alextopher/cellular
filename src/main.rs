@@ -11,7 +11,7 @@ use parameters::{ControlState, Parameters};
 
 use image::buffer::ConvertBuffer;
 use image::RgbaImage;
-use nokhwa::Camera;
+use nokhwa::{Camera, utils::{CameraIndex, Resolution as CamRes, RequestedFormat, RequestedFormatType}, pixel_format::RgbAFormat};
 use std::sync::Arc;
 use vulkano::instance::Instance;
 use vulkano::swapchain::Surface;
@@ -47,7 +47,7 @@ impl VulkanWindow {
         (sfc, el)
     }
 
-    fn init(control_state: Arc<ControlState>, res: nokhwa::Resolution) -> Self {
+    fn init(control_state: Arc<ControlState>, res: CamRes) -> Self {
         let inst = VulkanData::<()>::init_vk_instance();
         let (sfc, el) = Self::init_winit(&inst);
         let mut vk = VulkanData::init(inst, sfc.clone(), res);
@@ -181,7 +181,7 @@ fn main() {
     // TODO
     //nokhwa::nokhwa_initialize(something);
     let (tx, rx) = std::sync::mpsc::sync_channel(100);
-    let mut cam = nokhwa::Camera::new(0, None).expect("could not initialize camera!");
+    let mut cam = Camera::new(CameraIndex::Index(0), RequestedFormat::new::<RgbAFormat>(RequestedFormatType::None)).expect("could not initialize camera!");
     cam.open_stream().expect("could not open camera stream");
     let res = cam.resolution();
     println!("camera frame rate: {}", cam.frame_rate());
@@ -189,8 +189,9 @@ fn main() {
         tx.send(
             cam.frame()
                 .expect("could not capture camera frame!")
-                .convert(),
-        );
+                .decode_image::<RgbAFormat>()
+                .expect("could not convert camera frame to RGBA format!"),
+        ).expect("could not send camera frame to GPU thread!");
         //println!("captured frame");
     });
     let control_state = Arc::new(parameters::new_control_state());

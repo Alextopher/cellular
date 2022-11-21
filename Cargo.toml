@@ -18,9 +18,9 @@ bytemuck = "^1.7"
 colored = "2.0"
 itertools = "0.10"
 # it may be necessary to adjust this with nokhwa version
-image = "0.23"
+image = "0.24"
 midir = "0.8"
 
 [dependencies.nokhwa]
-version = "0.9"
+version = "0.10.0-rc.2"
 features = ["input-v4l", "input-msmf", "output-threaded"]
