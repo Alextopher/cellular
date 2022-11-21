@@ -13,6 +13,7 @@ pub struct Parameters {
     pub stdevs: [f32; 3],
     pub small_stdev: f32,
     pub big_stdev: f32,
+    pub color_euler_angles: [f32; 3],
 }
 
 /// the state of the control board, or 0xff if no change
@@ -60,6 +61,12 @@ impl Parameters {
         }
         if let Some(x) = read_control_state(cs, 17).map(|x| ((x as f32 + 0.5) / 127.0) * 60.0) {
             self.small_stdev = x;
+        }
+        let f = |x: u8| -> f32 { std::f32::consts::TAU * x as f32 / 128.0 };
+        for i in 0..3 {
+            if let Some(x) = read_control_state(cs, 18 + i).map(|x| f(x)) {
+                self.color_euler_angles[i] = x;
+            }
         }
     }
 }

@@ -7,9 +7,8 @@ mod gpu_gore;
 mod parameters;
 
 use gpu_gore::VulkanData;
-use parameters::{ControlState, Parameters};
+use parameters::ControlState;
 
-use image::buffer::ConvertBuffer;
 use image::RgbaImage;
 use nokhwa::{
     pixel_format::RgbAFormat,

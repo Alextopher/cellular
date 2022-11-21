@@ -24,7 +24,7 @@ mod blit_shader {
 use super::DEFAULT_DIMS;
 use crate::parameters::Parameters;
 
-use nokhwa::{utils::Resolution as CamRes, Camera};
+use nokhwa::utils::Resolution as CamRes;
 use rand::Rng;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;
@@ -499,6 +499,7 @@ impl<W: 'static + Debug + Sync + Send> VulkanData<W> {
                 stdevs: [0.05, 0.02, 0.01],
                 small_stdev: 15.0,
                 big_stdev: 30.0,
+                color_euler_angles: [0.0, 0.0, 0.0],
             },
         )
         .expect("could not create camera buffer!");

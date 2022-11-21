@@ -18,6 +18,9 @@ layout(set = 0, binding = 0) buffer parameters {
   float stdevs_b;
   float small_stdev;
   float big_stdev;
+  float euler_angle_1;
+  float euler_angle_2;
+  float euler_angle_3;
 } params;
 
 layout(set = 0, binding = 1) buffer ly_arena {
@@ -31,6 +34,27 @@ layout(set = 0, binding = 2) buffer ly_xblur {
 layout(set = 0, binding = 3) uniform sampler2D camera_image;
 
 #include "kernel.glsl"
+
+mat4 mat_from_euler_angles(float ea1, float ea2, float ea3) {
+  return mat4(
+      cos(ea1), -sin(ea1), 0.0, 0.0,
+      -sin(ea1), cos(ea1), 0.0, 0.0,
+      0.0, 0.0, 1.0, 0.0,
+      0.0, 0.0, 0.0, 0.0
+      ) *
+    mat4(
+        cos(ea3), 0.0, -sin(ea3), 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        -sin(ea2), 0.0, cos(ea3), 0.0,
+        0.0, 0.0, 0.0, 0.0
+        ) *
+    mat4(
+        cos(ea3), -sin(ea3), 0.0, 0.0,
+        -sin(ea3), cos(ea3), 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 0.0
+        );
+}
 
 vec4 blurred_sample(ivec2 coords, int offset) {
   int column_stride = 2 * constants.width;
@@ -64,6 +88,7 @@ void main() {
   const float b = params.mat_b;
   const float c = params.mat_c;
 
+  const mat4 color_tf = mat_from_euler_angles(params.euler_angle_1, params.euler_angle_2, params.euler_angle_3);
   const mat4 cross_diff = mat4(
       a,    c,    b,    0,
       b,    a,    c,    0,
@@ -87,9 +112,9 @@ void main() {
 
   vec4 two_sigma = 2.0 * vec4(params.stdevs_r, params.stdevs_g, params.stdevs_b, 1.0);
   vec4 mu = camera_value;
-  vec4 diff = n - mu;
+  vec4 diff = color_tf * (n - mu);
   vec4 factor = 2.0 * exp(- diff * diff / two_sigma) - 1.0;
-  factor = cross_diff * factor;
+  factor = transpose(color_tf) * cross_diff * factor;
 
   vec4 cell_diff = factor * step;
   vec4 total_diff = cell_diff - fade_factor * self;
