@@ -24,7 +24,7 @@ mod blit_shader {
 use super::DEFAULT_DIMS;
 use crate::parameters::Parameters;
 
-use nokhwa::{Camera, utils::Resolution as CamRes};
+use nokhwa::{utils::Resolution as CamRes, Camera};
 use rand::Rng;
 use std::collections::hash_set::HashSet;
 use std::fmt::Debug;

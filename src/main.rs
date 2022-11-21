@@ -11,7 +11,11 @@ use parameters::{ControlState, Parameters};
 
 use image::buffer::ConvertBuffer;
 use image::RgbaImage;
-use nokhwa::{Camera, utils::{CameraIndex, Resolution as CamRes, RequestedFormat, RequestedFormatType}, pixel_format::RgbAFormat};
+use nokhwa::{
+    pixel_format::RgbAFormat,
+    utils::{CameraIndex, RequestedFormat, RequestedFormatType, Resolution as CamRes},
+    Camera,
+};
 use std::sync::Arc;
 use vulkano::instance::Instance;
 use vulkano::swapchain::Surface;
@@ -180,8 +184,12 @@ fn main() {
 
     // TODO
     //nokhwa::nokhwa_initialize(something);
-    let (tx, rx) = std::sync::mpsc::sync_channel(100);
-    let mut cam = Camera::new(CameraIndex::Index(0), RequestedFormat::new::<RgbAFormat>(RequestedFormatType::None)).expect("could not initialize camera!");
+    let (tx, rx) = std::sync::mpsc::sync_channel(4);
+    let mut cam = Camera::new(
+        CameraIndex::Index(0),
+        RequestedFormat::new::<RgbAFormat>(RequestedFormatType::None),
+    )
+    .expect("could not initialize camera!");
     cam.open_stream().expect("could not open camera stream");
     let res = cam.resolution();
     println!("camera frame rate: {}", cam.frame_rate());
@@ -191,7 +199,8 @@ fn main() {
                 .expect("could not capture camera frame!")
                 .decode_image::<RgbAFormat>()
                 .expect("could not convert camera frame to RGBA format!"),
-        ).expect("could not send camera frame to GPU thread!");
+        )
+        .expect("could not send camera frame to GPU thread!");
         //println!("captured frame");
     });
     let control_state = Arc::new(parameters::new_control_state());
