@@ -1,3 +1,3 @@
 # cellular
 
-This was a digital art progress for a Class at Clarkson University.
+This was made for a digital art class at Clarkson University.
